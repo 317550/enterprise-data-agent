@@ -49,8 +49,13 @@ class Settings(BaseSettings):
     demo_end_date: str = "2024-12-31"
 
     # --- Read-only SQL limits (enforced from stage 2) -----------------------
+    # These are in-process budgets, not a hard OS sandbox or hard realtime.
     sql_max_rows: int = Field(default=1000, gt=0)
     sql_timeout_seconds: float = Field(default=10.0, gt=0)
+    sql_max_sql_chars: int = Field(default=8000, gt=0)
+    sql_max_result_bytes: int = Field(default=256000, gt=0)
+    #: Byte budget for ``SQLITE_LIMIT_LENGTH`` (strings/blobs), not a character count.
+    sql_max_value_bytes: int = Field(default=4096, gt=0)
 
     # --- Test switches ------------------------------------------------------
     #: Must stay False in CI and in the default test run: the automated suite
@@ -81,6 +86,10 @@ class Settings(BaseSettings):
             "demo_seed": self.demo_seed,
             "demo_window": f"{self.demo_start_date}..{self.demo_end_date}",
             "sql_max_rows": self.sql_max_rows,
+            "sql_timeout_seconds": self.sql_timeout_seconds,
+            "sql_max_sql_chars": self.sql_max_sql_chars,
+            "sql_max_result_bytes": self.sql_max_result_bytes,
+            "sql_max_value_bytes": self.sql_max_value_bytes,
             "enable_live_llm_tests": self.enable_live_llm_tests,
         }
 

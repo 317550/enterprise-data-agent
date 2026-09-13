@@ -11,8 +11,8 @@ view* of that config:
         -> METRIC_REGISTRY       MetricDefinition (spec + rendered SQL)
 
 The module still produces SQL *text* and bound parameters only. It never
-executes anything: execution lives behind :mod:`eda.db` today and behind the
-safe executor from stage 2 onwards.
+executes anything: stage 2 analysis queries run through :mod:`eda.sql.executor`,
+which opens connections only via :mod:`eda.db`.
 """
 
 from __future__ import annotations
@@ -181,7 +181,8 @@ class MetricFilters(BaseModel):
     @field_validator("start_date", "end_date")
     @classmethod
     def _iso_date(cls, value: str) -> str:
-        dt.date.fromisoformat(value)
+        if dt.date.fromisoformat(value).isoformat() != value:
+            raise ValueError("dates must use YYYY-MM-DD")
         return value
 
     @field_validator("region")

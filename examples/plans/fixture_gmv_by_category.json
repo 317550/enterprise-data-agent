@@ -1,0 +1,9 @@
+{
+  "metric_id": "effective_order_gmv_cents",
+  "operation": "breakdown",
+  "start_date": "2024-01-01",
+  "end_date": "2024-12-31",
+  "dimension_id": "category",
+  "order_by": "metric_value",
+  "sort_direction": "desc"
+}

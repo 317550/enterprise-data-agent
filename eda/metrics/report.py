@@ -23,6 +23,7 @@ from pathlib import Path
 
 from eda.config import get_settings
 from eda.db import DatabaseError, connect_readonly
+from eda.query.errors import QueryError
 from eda.metrics.core import compute_breakdown, compute_core_metrics
 from eda.metrics.definitions import (
     AOV_METRIC_ID,
@@ -190,6 +191,9 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.show_definitions:
             _print_definitions()
+    except QueryError as exc:
+        print(f"[report] {exc.code}: {exc.message}")
+        return 1
     finally:
         conn.close()
     return 0

@@ -47,7 +47,7 @@
 | 5 | 结论证据校验、受控图表、Streamlit 界面与运行记录 |
 | 6 | 对照实验、独立保留集评测、离线 CI 与发布检查 |
 
-阶段 1 与 1.1 已完成。逐项实现 / 测试 / 验证状态见
+阶段 1、1.1 与 2 已完成。逐项实现 / 测试 / 验证状态见
 [`docs/progress.md`](progress.md) 的追踪表。
 
 ---
@@ -183,19 +183,56 @@ IMPLEMENTED_ANALYSIS_OPERATIONS` 声明，目前只有 `total` 和 `breakdown`�
 ### 5.2 SQL 只有一条执行通道
 
 `eda/db.py` 是整个项目里唯一出现 `sqlite3.connect` 的模块，并由
-`test_sqlite_connect_lives_only_in_eda_db` 守住。阶段 2 会在它之上加一层
-`eda/sql/executor.py`：
+`test_sqlite_connect_lives_only_in_eda_db` 守住。阶段 2 已在它之上加上执行策略
+`eda/sql/executor.py`：执行器**不得**自己 `connect`，只调用 `connect_readonly`。
 
-- 用 **SQLGlot 解析成 AST** 后判断语句类型，而不是看字符串前缀或写正则
-  （`SELECT` 前缀可以被 CTE、注释、多语句、`PRAGMA` 绕过）；
-- 必须单语句；只允许 `SELECT`（含 `WITH ... SELECT`）；
-- 表名必须落在白名单内，且**不包含状态库**；
-- 强制行数上限与执行超时；
-- 参数一律绑定，绝不把值拼进 SQL 字符串（阶段 1.1 的 `build_core_metrics_sql`
-  已经是这个写法，并有测试断言 SQL 文本里不含字面值）。
+三个防护边界分开，不混在一个类里：
 
-数据库连接自身也是只读的双保险：`mode=ro` URI（SQLite 层面拒绝写，且不会创建文件）
-加 `PRAGMA query_only = ON`。测试验证即使 `query_only` 被关掉，`mode=ro` 仍然生效。
+1. **AnalysisPlan**（`eda/plan/models.py`）：业务请求是否合法——指标、维度、操作、
+   日期闭区间、过滤词表。禁止传入 SQL / 表名 / 表达式。
+2. **SQLGlot validator**（`eda/sql/validator.py`）：SQL 结构与对象访问是否合法。
+   用 AST 判断语句类型，而不是看字符串前缀或写正则（`SELECT` 前缀可以被 CTE、
+   注释、多语句、`PRAGMA` 绕过）。必须单条 SELECT；允许非递归 CTE、INNER/LEFT JOIN
+   **仅 `JOIN ... ON`**、`COUNT(*)`；拒绝 `JOIN ... USING`、`SELECT *`、递归 CTE、
+   集合运算、窗口函数、写操作、DDL、`ATTACH` / `PRAGMA`、系统表、未批准函数、
+   未限定的歧义列、CTE 遮蔽物理表。CTE / 表名 / 别名按 SQLite 语义做
+   ASCII 大小写折叠比较，因此 `WITH Orders` 与 `WITH ORDERS` 同样不得遮蔽 `orders`。
+   Unicode 字母不按 Python casefold 等同为 ASCII。未识别节点、深层递归解析、
+   CTE 显式列重命名、重复 CTE 名与派生表默认拒绝；嵌套 SELECT 逐层校验。
+3. **SQLite authorizer**（`eda/sql/authorizer.py`）：执行层最后防护。默认拒绝，
+   只放行 `SQLITE_SELECT`、**`main` 库**上批准关系/列的 `SQLITE_READ`、批准函数。
+   `temp` 与 ATTACH 库的 READ 一律拒绝。`COUNT(*)` 时 SQLite 可能把 `dbname` 留空，
+   只有安装策略前通过受信 `PRAGMA database_list` 确认连接仅含 main，且
+   READ 的 column 为空字符串、dbname 为 None 时，才允许按 main 检查。
+   已有 temp 或 ATTACH 时拒绝这种不确定来源的读取，即便它实际来自主库。
+   安装后 ATTACH 与 DDL 均被拒绝，连接须由调用者独占。拒绝用 `SQLITE_DENY`，
+   不用 `SQLITE_IGNORE`。真实回调与附加库集成证据见 `stage2-review.md`。
+
+另外：
+
+- 编译器只输出参数化 SQL，标识符来自语义配置，过滤值绑定为 `:filter_0` 等；
+- 排名就是 `breakdown + order_by + top_n`，按最终指标排序，`NULL` 用 `NULLS LAST`；
+- 行数 / 返回字节 / SQL 长度 / 单值字节 / 执行超时是**进程内尽力而为**，不是 OS 沙箱，
+  也不是 `sqlite3.connect(..., timeout=)`（那只是锁等待）。
+  `sql_max_value_bytes` / `SQLITE_LIMIT_LENGTH` 按**字节**计，不是字符数，
+  也可能约束 SQLite 内部编码后的整行长度，不能理解为只约束单个展示值；
+- 空结果是成功；`top_n` 与执行器截断分开标记，二者都不能当作完整总体再汇总。
+
+`max_result_bytes` 计每行值数组经 `json.dumps(ensure_ascii=False)` 后的 UTF-8
+字节数之和（包括该行方括号、分隔符与转义）；不包括列名、SQL、元数据、外层
+JSON 包装或 pretty-print 空白。超预算行不进入结果。这不是最终输出文件的总字节上限。
+SQL 文本先按 Python 字符数检查；SQLite 的字节上限使用最多四倍字符预算。
+时间限制使用 monotonic deadline 和 progress handler，不使用 LIMIT 充当超时。
+
+`execute_on_connection` 要求调用者独占连接且没有既有 authorizer/progress handler；
+Python sqlite3 无法读取旧回调，因此接口不承诺恢复未知旧回调。执行结束清理本次
+cursor 和回调，并恢复原 SQLite 长度限制。内部新建连接在成功/失败时均关闭，
+连接工厂初始化失败也关闭。旧报表无法表达执行器截断时直接报 resource_limit。
+结构化查询保留过滤维度/op 元数据，省略原始过滤值；固定错误文案不回显路径或绑定值。
+
+数据库连接自身也是只读的双保险：正确编码的 `mode=ro` URI（SQLite 层面拒绝写，
+且不会为不存在的路径创建空库）加 `PRAGMA query_only = ON`，并关闭扩展加载。
+测试验证即使 `query_only` 被关掉，`mode=ro` 仍然生效。
 
 ### 5.3 两个数据库彻底分开
 
@@ -264,14 +301,25 @@ eda/
   metrics/
     operations.py          # 封闭的计算操作集合（sum / count_distinct / ratio）
     definitions.py         # 语义层的编译产物：渲染 SQL 文本 + 绑定参数
-    core.py                # 核心指标与单维度拆分的计算
+    core.py                # 核心指标与单维度拆分；经小型适配走统一执行器
     report.py              # 只读命令行报表（人工核对用，无 LLM）
+  plan/
+    models.py              # AnalysisPlan：业务请求是否合法
+  sql/
+    compiler.py            # AnalysisPlan → 参数化 SQL（不执行）
+    catalog.py             # 从语义层发布批准的表/列/函数
+    validator.py           # SQLGlot AST：结构与对象访问
+    authorizer.py          # SQLite 执行层默认拒绝
+    executor.py            # 执行策略：校验 → authorizer → 资源限制
+  query/
+    service.py             # 计划闭环：parse → compile → execute → 结构化结果
+    cli.py                 # 薄 CLI：读 JSON 计划
 ```
 
 **定义、编译、执行三者分离**是这里的关键：YAML 负责定义，`operations.py` +
-`definitions.py` 负责编译成 SQL 文本，`eda/db.py`（阶段 2 后是安全执行器）负责执行。
-好处是阶段 2 的 AnalysisPlan 编译器可以直接复用同一套语义与同一组操作，
-而不是再拼一遍公式。
+`definitions.py` / `eda/sql/compiler.py` 负责编译成 SQL 文本，`eda/sql/executor.py`
+负责执行策略，真正的 `sqlite3.connect` 仍只在 `eda/db.py`。AnalysisPlan 编译器
+复用同一套语义表达式，没有再写一份公式。
 
 ---
 
@@ -279,7 +327,7 @@ eda/
 
 | 阶段 | 新增模块 | 要点 |
 |---|---|---|
-| 2 | `eda/plan/`、`eda/sql/validator.py`、`eda/sql/executor.py` | AnalysisPlan schema 与校验、确定性 SQL 编译器、SQLGlot AST 校验、表白名单、行数/超时上限、对抗测试 |
+| 2（已完成） | `eda/plan/`、`eda/sql/`、`eda/query/` | AnalysisPlan schema 与校验、确定性 SQL 编译器、SQLGlot AST 校验、SQLite authorizer、行数/超时上限、对抗测试 |
 | 3 | `eda/llm/client.py`、`eda/graph/` | DeepSeek 客户端（配置驱动）、LangGraph 单轮流程、口径澄清、有限错误处理 |
 | 4 | `eda/graph/checkpoint.py`、`eda/plan/multistep.py` | 有限多步对比与贡献拆解（数值分解，非因果）、checkpoint 持久化、`thread_id` 会话隔离 |
 | 5 | `app/streamlit_app.py`、`eda/viz/`、`eda/audit/` | 结论证据校验、受控确定性图表、运行记录与追溯 |

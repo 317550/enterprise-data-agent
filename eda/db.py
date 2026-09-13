@@ -2,16 +2,17 @@
 
 Why this module is small and boring on purpose
 ----------------------------------------------
-The project has a hard constraint: there must be exactly ONE path that executes
-SQL against the business database. Stage 2 adds the validating safe executor on
-top of :func:`fetch_all`; from that point on, application and agent code must go
-through the executor and nothing else may import :func:`fetch_all` directly.
-Keeping every ``sqlite3.connect`` call here is what makes that rule checkable.
+The project has a hard constraint: there must be exactly ONE path that opens a
+SQLite connection. Stage 2's safe executor calls the factories below; it must
+not call ``sqlite3.connect`` itself.
 
 Read-only means read-only twice over:
-  1. the connection is opened with the ``mode=ro`` URI flag, so SQLite itself
-     refuses writes and will not create a missing file;
+  1. the connection is opened with a correctly encoded ``mode=ro`` URI, so
+     SQLite itself refuses writes and will not create a missing file;
   2. ``PRAGMA query_only = ON`` is set as defence in depth.
+
+``sqlite3.connect(..., timeout=)`` is the lock-wait budget, not a SQL
+execution timeout. Execution time limits live in :mod:`eda.sql.executor`.
 """
 
 from __future__ import annotations
@@ -44,28 +45,50 @@ def require_supported_sqlite() -> None:
         )
 
 
-def _configure(conn: sqlite3.Connection) -> sqlite3.Connection:
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
-
-
-def connect_readonly(db_path: str | Path) -> sqlite3.Connection:
-    """Open the business database read-only.
-
-    Raises :class:`DatabaseError` if the file does not exist, because the
-    ``mode=ro`` URI would otherwise fail with a less obvious message.
-    """
+def readonly_uri(db_path: str | Path) -> str:
+    """Build a ``file:`` URI with ``mode=ro`` and percent-encoded path parts."""
     path = Path(db_path)
     if not path.is_file():
         raise DatabaseError(
             f"business database not found: {path}. "
             "Build it first with: python -m eda.data.build_db --dataset demo"
         )
-    uri = f"file:{path.resolve().as_posix()}?mode=ro"
+    return f"{path.resolve().as_uri()}?mode=ro"
+
+
+def _configure(conn: sqlite3.Connection) -> sqlite3.Connection:
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+def _disable_extensions(conn: sqlite3.Connection) -> None:
+    enable = getattr(conn, "enable_load_extension", None)
+    if enable is None:
+        return
+    try:
+        enable(False)
+    except sqlite3.OperationalError:
+        return
+
+
+def connect_readonly(db_path: str | Path) -> sqlite3.Connection:
+    """Open the business database read-only.
+
+    Raises :class:`DatabaseError` if the file does not exist, because the
+    ``mode=ro`` URI would otherwise fail with a less obvious message and must
+    never create an empty database.
+    """
+    uri = readonly_uri(db_path)
+    # timeout is lock-wait only; it is not a statement deadline.
     conn = sqlite3.connect(uri, uri=True, timeout=5.0)
-    _configure(conn)
-    conn.execute("PRAGMA query_only = ON")
+    try:
+        _configure(conn)
+        _disable_extensions(conn)
+        conn.execute("PRAGMA query_only = ON")
+    except BaseException:
+        conn.close()
+        raise
     return conn
 
 
@@ -79,6 +102,7 @@ def connect_for_build(db_path: str | Path) -> sqlite3.Connection:
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, timeout=10.0)
+    _disable_extensions(conn)
     return _configure(conn)
 
 
@@ -87,10 +111,10 @@ def fetch_all(
     sql: str,
     params: Mapping[str, Any] | Sequence[Any] | None = None,
 ) -> list[sqlite3.Row]:
-    """Execute one statement and return all rows.
+    """Execute one trusted statement and return all rows.
 
-    This is the single execution primitive. Parameters are always bound, never
-    formatted into the SQL string.
+    Runtime analysis queries must use :func:`eda.sql.executor.execute_on_connection`
+    instead. This helper remains for schema introspection and the build path.
     """
     cursor = conn.execute(sql, params if params is not None else {})
     try:
