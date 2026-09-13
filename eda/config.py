@@ -33,6 +33,17 @@ class Settings(BaseSettings):
     llm_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     llm_timeout_seconds: float = Field(default=60.0, gt=0)
     llm_max_output_tokens: int = Field(default=2048, gt=0)
+    #: Explicit reproducible reference; never inferred from the machine clock.
+    analysis_reference_date: str = "2024-12-31"
+
+    @field_validator("analysis_reference_date")
+    @classmethod
+    def _reference_date(cls, value: str) -> str:
+        import datetime as dt
+
+        if dt.date.fromisoformat(value).isoformat() != value:
+            raise ValueError("reference date must use YYYY-MM-DD")
+        return value
 
     # --- Databases ----------------------------------------------------------
     #: Business data. Opened read-only everywhere except the build script.

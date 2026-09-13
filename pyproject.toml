@@ -41,6 +41,7 @@ packages = [
     "eda.plan",
     "eda.sql",
     "eda.query",
+    "eda.agent",
 ]
 
 [tool.setuptools.package-data]

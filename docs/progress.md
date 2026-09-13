@@ -2,6 +2,15 @@
 
 分阶段实施，每阶段完成后停下来交付、复核，再进入下一阶段。
 
+2026-09-13 阶段三更新：`eda/agent/` 已实现单轮自然语言规划和 Fake 离线测试。
+复用阶段二全链路，不允许模型生成或修复 SQL。默认离线，真实 HTTPS 适配器
+只在显式 `--provider real` 时选择；真实烟雾测试仍待用户手工执行。
+协议、预算、命令与边界见[阶段三说明](stage3-planning.md)。
+最终离线验证：488 passed in 7.87s（exit 0）；原有 374 项全部保留，新增
+105 项规划测试及 9 项随新模块展开的代码约束检查。pip check / diff check
+均 exit 0。数据库 SHA256 / mtime 未变，未修改 fixture 或期望值；未联网调用模型，
+未 commit / push / merge / tag，未切换分支。
+
 2026-09-13 阶段二独立审查：亲自复现基线 311 passed，定向修复后完整测试
 374 passed（exit 0）；pip check / git diff --check 均通过。两项示例输出正确，
 business.db 与 fixture.db 的 SHA256 / mtime 均未变化。旧记录中“空 dbname
@@ -12,7 +21,7 @@ business.db 与 fixture.db 的 SHA256 / mtime 均未变化。旧记录中“空 
 |---|---|---|
 | 1 | 数据基础、语义定义、人工 fixture 与评测划分规则 | ✅ 已完成（阶段 1 + 阶段 1.1，2026-09-13） |
 | 2 | 结构化 AnalysisPlan 校验、确定性 SQL 编译器、统一只读安全执行器 | ✅ 已完成（2026-09-13） |
-| 3 | LangGraph 单轮指标查询、口径澄清与有限错误处理 | ⬜ 未开始 |
+| 3 | 自然语言 → AnalysisPlan 单轮规划、澄清/拒绝与一次计划修复 | ✅ 离线实现完成；真实烟雾验证待执行 |
 | 4 | 有限多步对比与贡献拆解、多轮追问与持久化 | ⬜ 未开始 |
 | 5 | 结论证据校验、受控图表、Streamlit 界面与运行记录 | ⬜ 未开始 |
 | 6 | 对照实验、独立保留集评测、离线 CI 与发布检查 | ⬜ 未开始 |
@@ -77,14 +86,14 @@ business.db 与 fixture.db 的 SHA256 / mtime 均未变化。旧记录中“空 
 | 现有 metrics/report 经小型适配走统一执行器 | `eda/metrics/core.py` | 既有 `test_fixture_metrics.py` / `test_report_cli.py` | ✅ |
 | SQL 注入 / 绕过对抗 | validator + authorizer + 绑定参数 | `test_sql_validator.py`、`test_sql_executor.py`、`test_sql_compiler.py` | ✅ |
 
-### 尚未实现（按阶段）
+### 后续工作与真实验证（旧阶段三方案已被当前协议覆盖）
 
 | 需求 | 阶段 | 代码 | 测试 | 状态 |
 |---|---|---|---|---|
-| DeepSeek 客户端（配置驱动） | 3 | `eda/llm/client.py`（待建） | — | ⬜ |
-| LangGraph 单轮指标查询 | 3 | `eda/graph/`（待建） | — | ⬜ |
-| 口径澄清（歧义时先问） | 3 | `eda/graph/clarify.py`（待建） | — | ⬜ |
-| 有限错误处理与修复次数上限 | 3 | `eda/graph/repair.py`（待建） | — | ⬜ |
+| 单轮规划协议与模型接口 | 3 | `eda/agent/models.py`、`planner.py`、`fake.py`、`real.py` | `test_agent_planning.py` | ✅ 离线验证；真实适配器待烟雾验证 |
+| LangGraph | 不在本阶段 | — | — | 不实现 |
+| 口径澄清（歧义时先问） | 3 | `eda/agent/service.py` | `test_agent_planning.py` | ✅ |
+| 一次计划修复与最多两次调用 | 3 | `eda/agent/service.py` | `test_agent_planning.py` | ✅ |
 | 有限多步对比（`compare` 操作） | 4 | `eda/plan/multistep.py`（待建） | — | ⬜ |
 | 贡献拆解（`contribution`，仅数值分解） | 4 | `eda/plan/multistep.py`（待建） | — | ⬜ |
 | checkpoint 持久化与会话隔离 | 4 | `eda/graph/checkpoint.py`（待建） | — | ⬜ |
@@ -96,7 +105,7 @@ business.db 与 fixture.db 的 SHA256 / mtime 均未变化。旧记录中“空 
 | 对照实验（语义层 vs 自由 Text-to-SQL 基线） | 6 | `evaluation/`（待建） | — | ⬜ |
 | 离线 CI | 6 | `.github/workflows/`（待建） | — | ⬜ |
 | 打包发布检查（`semantic/*.yaml` 未进 wheel） | 6 | `pyproject.toml` | — | ⬜ |
-| DeepSeek 模型名 / 鉴权 / 响应格式的真实验证 | 3 | `eda/config.py`（值已就位） | 需人工执行 `live_llm` 测试 | ⚠️ 未验证 |
+| DeepSeek 模型名 / 鉴权 / 响应格式的真实验证 | 3 | `eda/agent/real.py` | 需手工执行 `--provider real` CLI | ⚠️ 未验证 |
 | Python 3.11 上的运行验证 | — | — | — | ⚠️ 本机无 3.11，未验证 |
 | 非 Windows 平台验证 | — | — | — | ⚠️ 未验证 |
 

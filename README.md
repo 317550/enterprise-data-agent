@@ -1,8 +1,8 @@
 # Enterprise Data Agent
 
-基于 **LangGraph 与业务语义层**的**只读**经营数据分析 Agent：自然语言问题 →
+基于**受控业务语义层**的**只读**经营数据分析 Agent：自然语言问题 →
 结构化分析计划 → 确定性 SQL 编译 → 安全校验与只读执行 → 结果与证据，
-支持多轮追问与会话恢复。
+当前支持单轮规划，多轮追问与会话恢复尚未实现。
 
 > **这是一个本地、可复现、可测试的作品集项目，不声称生产就绪。**
 > 数据是虚构的电商经营数据，不含任何真实个人信息。
@@ -12,9 +12,11 @@
 
 自由 Text-to-SQL 在本项目中**只作为评测基线**，不是默认执行路径。
 
-**当前进度：阶段 1 + 阶段 1.1 + 阶段 2 已完成**（数据基础、版本化语义层、
-人工 fixture、AnalysisPlan 闭环与统一只读安全执行器）。目前不调用任何 LLM，
-也不包含 LangGraph 与 Web 界面。
+**当前进度：阶段 1、1.1、2 与阶段 3 离线实现已完成**。阶段三新增
+PlannerDecision → AnalysisPlan 单轮规划；默认 Fake 模型，无联网，真实规划
+需显式 `--provider real`。模型不能生成 SQL、访问数据库或解释数值。
+未包含 LangGraph 与 Web 界面，真实模型烟雾验证待用户手工执行。
+协议、时间规则、预算和命令见[阶段三说明](docs/stage3-planning.md)。
 完整分阶段状态与逐项追踪表见 [`docs/progress.md`](docs/progress.md)。
 
 ---
@@ -46,7 +48,7 @@
 | 解释器 | `.venv\Scripts\python.exe`，CPython 3.12.6 |
 | SQLite | 3.45.3（CPython 3.12.6 自带） |
 | `pip check` | `No broken requirements found.` |
-| `pytest -q` | **374 passed**（阶段二独立审查后） |
+| `pytest -q` | **488 passed**（阶段三 Fake 离线验证后；原阶段二基线 374 项保留） |
 
 其他平台、其他 Python 版本（含计划里的 3.11）**均未验证**。
 
@@ -209,6 +211,6 @@ enterprise_data_agent/
 10. 不引入需求外的框架、微服务、Redis、向量数据库或多 Agent 系统。
 11. 贡献拆解只是数值分解，**不得表述为因果推断**。
 
-**费用控制**：`pytest` 默认不产生任何外部调用。真实 DeepSeek 调用要等阶段 3，
-并且必须由你手动执行带 `live_llm` 标记的测试，同时在 `.env` 中把
-`ENABLE_LIVE_LLM_TESTS` 设为 `true`。
+**费用控制**：自动化测试全部离线。阶段三真实调用只能手工传 `--provider real`，
+Key 仅从进程环境 `DEEPSEEK_API_KEY` 读取，`.env` 中的 Key 不启用真实适配器。
+每请求最多两次模型调用（规划 + 一次计划修复），没有 SQL 修复或解释调用。

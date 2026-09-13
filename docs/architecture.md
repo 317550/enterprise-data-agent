@@ -2,7 +2,9 @@
 
 本项目是一个**本地可复现、可测试的作品集项目**，不声称生产就绪。
 
-**项目定位（阶段 1.1 更新）**：基于 **LangGraph 与业务语义层** 的经营分析 Agent。
+**当前项目定位（阶段三更新）**：基于受控业务语义层的单轮经营分析 Agent。
+阶段三采用接口驱动的规划服务，不引入 LangGraph 或第二次模型解释。当前实现以
+[阶段三协议](stage3-planning.md) 为准，模型不接触 SQL 或数据库。
 
 不是「把自然语言翻译成 SQL」，而是「把自然语言映射到受控的业务语义，再由确定性代码
 编译成 SQL」。这个区别决定了后面所有设计。
@@ -15,6 +17,7 @@
 
 ```
 自然语言问题
+   → PlannerDecision（ready / clarify / refuse，最多一次计划修复）
    → 结构化分析计划（AnalysisPlan，受 Pydantic 与语义层校验）
    → 确定性 SQL 编译（无模型参与，纯代码）
    → 统一只读安全执行
@@ -42,64 +45,34 @@
 |---|---|
 | 1 | 数据基础、语义定义、人工 fixture 与评测划分规则 |
 | 2 | 结构化 AnalysisPlan 校验、确定性 SQL 编译器、统一只读安全执行器 |
-| 3 | LangGraph 单轮指标查询、口径澄清与有限错误处理 |
+| 3 | 自然语言 → 受控 AnalysisPlan 单轮规划、澄清/拒绝、一次计划修复 |
 | 4 | 有限多步对比与贡献拆解、多轮追问与持久化 |
 | 5 | 结论证据校验、受控图表、Streamlit 界面与运行记录 |
 | 6 | 对照实验、独立保留集评测、离线 CI 与发布检查 |
 
-阶段 1、1.1 与 2 已完成。逐项实现 / 测试 / 验证状态见
+阶段 1、1.1、2 与阶段三离线实现已完成；真实模型验证待手工执行。逐项状态见
 [`docs/progress.md`](progress.md) 的追踪表。
 
 ---
 
-## 3. 目标形态（阶段 6 完成后）
+## 3. 当前阶段三形态
 
-```
-                 ┌──────────────────────────────────────────────┐
-   用户提问  ──▶ │  Streamlit UI（阶段 5）                       │
-                 └───────────────────┬──────────────────────────┘
-                                     ▼
-                 ┌──────────────────────────────────────────────┐
-                 │  LangGraph 图（阶段 3 / 4）                   │
-                 │                                              │
-                 │  parse_plan → validate_plan → compile_sql    │
-                 │      ▲              │              │         │
-                 │  clarify（口径歧义） │              ▼         │
-                 │      │              └──────▶ execute_sql     │
-                 │  repair（有限次）◀── 失败 ──────┘   │         │
-                 │                                     ▼        │
-                 │                        verify_evidence       │
-                 │                                     │        │
-                 │                                     ▼        │
-                 │                            explain_result     │
-                 └────┬──────────────────┬───────────────┬──────┘
-                      │                  │               │
-              LLM（仅产出结构化     语义层（权威口径）   唯一 SQL 执行通道
-              计划与解释文本）           │               │
-                      ▼                  ▼               ▼
-         ┌────────────────────┐ ┌──────────────┐ ┌──────────────────────┐
-         │ eda/llm（阶段 3）   │ │ semantic/*.  │ │ eda/sql/executor      │
-         │ key/base_url/model │ │ yaml +       │ │ （阶段 2）             │
-         │ 全部来自配置        │ │ eda/semantic │ │ SQLGlot AST 校验       │
-         └────────────────────┘ └──────┬───────┘ └──────────┬───────────┘
-                                       │                     ▼
-                                       │         ┌──────────────────────┐
-                                       └────────▶│ eda/metrics（编译）   │
-                                                 │ 确定性 SQL 生成       │
-                                                 └──────────┬───────────┘
-                                                            ▼
-                                                 ┌──────────────────────┐
-                                                 │ eda/db.py            │
-                                                 │ sqlite3 唯一出入口    │
-                                                 └───┬──────────────┬───┘
-                                                     │              │
-                                      business.db（只读 mode=ro）  checkpoints.db
-                                                                  （仅应用写入，
-                                                                    模型不可见）
+```text
+自然语言问题 + 显式参考日期
+  → 只读范围预检 / 确定性日期窗口
+  → PlannerModel（默认 Fake；显式 real 才联网）
+  → PlannerDecision 严格校验
+      clarify / refuse → 安全问题或拒绝文案（不执行）
+      无效输出 → 只反馈脱敏错误类别，最多修复一次
+      ready → AnalysisPlan 完整校验与日期核对
+  → run_analysis_plan（复用阶段二全部防线）
+  → AnalysisResult + 确定性说明 / 完整性警告
 ```
 
-LLM 在这个架构里只做两件事：**把自然语言映射成结构化计划**，以及**把已经算好的结果
-写成解释文字**。它不产出业务定义，也不决定 SQL 结构。
+模型只负责规划，不负责计算或解释结果，不具备 SQL 或数据库能力。
+执行错误是终止状态，绝不返回模型修复。每请求最多两次模型调用。
+完整接口、命令和测试范围见 [stage3-planning.md](stage3-planning.md)。
+多轮持久化与后续编排仍未实现，也没有提前建设其框架。
 
 ---
 
@@ -264,8 +237,9 @@ API Key、Base URL、模型名全部来自 `eda/config.py`（pydantic-settings �
 Key 用 `SecretStr` 包装，打印 settings 或日志都只会看到掩码。
 `.env.example` 只含占位值，有测试断言这一点。
 
-真实模型调用必须由人显式触发：自动测试套件默认不选中 `live_llm` 标记，
-`ENABLE_LIVE_LLM_TESTS` 默认 `false`，因此 `pytest` 不会产生任何外部调用或费用。
+阶段三所有自动化测试使用 Fake，不访问网络。真实适配器只在 CLI 显式选择
+`--provider real` 时启用，Key 仅来自进程环境。最多两次规划调用；原 live_llm
+开关保留但不负责本阶段 CLI 的授权，默认 fake 不会因环境变量存在而联网。
 
 ---
 
@@ -328,7 +302,7 @@ eda/
 | 阶段 | 新增模块 | 要点 |
 |---|---|---|
 | 2（已完成） | `eda/plan/`、`eda/sql/`、`eda/query/` | AnalysisPlan schema 与校验、确定性 SQL 编译器、SQLGlot AST 校验、SQLite authorizer、行数/超时上限、对抗测试 |
-| 3 | `eda/llm/client.py`、`eda/graph/` | DeepSeek 客户端（配置驱动）、LangGraph 单轮流程、口径澄清、有限错误处理 |
+| 3（离线实现完成） | `eda/agent/` | PlannerDecision、Fake/真实规划适配器、严格日期和计划校验、最多两次模型调用；真实烟雾验证待执行 |
 | 4 | `eda/graph/checkpoint.py`、`eda/plan/multistep.py` | 有限多步对比与贡献拆解（数值分解，非因果）、checkpoint 持久化、`thread_id` 会话隔离 |
 | 5 | `app/streamlit_app.py`、`eda/viz/`、`eda/audit/` | 结论证据校验、受控确定性图表、运行记录与追溯 |
 | 6 | `evaluation/dev/`、`evaluation/heldout/`、`evaluation/runs/` | 对照实验（语义层 vs 自由 Text-to-SQL 基线）、独立保留集评测、离线 CI、发布检查 |
