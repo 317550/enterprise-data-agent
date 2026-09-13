@@ -1,0 +1,162 @@
+# ---------------------------------------------------------------------------
+# 语义层：表、关联关系与预关联分析视图
+#
+# 只描述 eda/data/schema.sql 中实际存在的 4 张表和 3 个视图，不编造新表。
+# tests/test_semantic_consistency.py 会用 PRAGMA 把列清单、主键、外键、视图状态
+# 过滤与真实数据库逐项比对，配置写错会立刻红。
+#
+# cardinality 封闭枚举：one_to_one / many_to_one / one_to_many
+# fan_out 只描述一个固定方向：from_table LEFT JOIN to_table 时，左侧
+# from_table 的输入行是否因匹配多条 to_table 记录而被放大：
+#   none             -- 左侧输入行不会被连接放大；many_to_one / one_to_one 必须使用
+#   duplicates_left  -- 一条左侧输入行会匹配多条右侧记录；one_to_many 必须使用
+# 把同一个 to_table 属性投影到多条既有 from_table 行不叫 fan-out。例如
+# order_items -> orders 不会复制 order_items 行，但订单级属性会在既有明细行上重复出现。
+#
+# 中文长文本写成 ">-" 后的单行，避免 YAML 折叠标量插入多余空格。
+# ---------------------------------------------------------------------------
+schema_version: "1.0.0"
+
+notes_zh: >-
+  粒度阶梯：orders（1 订单 1 行） -> order_items（1 订单 N 行） -> products / customers（按主键 1:1）。金额只在明细行粒度求和；订单数一律 COUNT(DISTINCT order_id)。
+
+tables:
+  - id: customers
+    name_zh: "客户表"
+    grain_zh: "一行 = 一个注册客户"
+    primary_key: ["customer_id"]
+    columns:
+      ["customer_id", "signup_date", "signup_region", "signup_channel", "customer_tier"]
+    notes_zh: >-
+      伪匿名，仅代理主键与粗粒度标签，不含姓名 / 手机号 / 邮箱 / 详细地址 / 证件号 / 生日。signup_region 是注册地区，不用于地区业绩统计。
+
+  - id: products
+    name_zh: "商品表"
+    grain_zh: "一行 = 一个可售商品（SKU）"
+    primary_key: ["product_id"]
+    columns: ["product_id", "product_name", "category", "list_price_cents", "is_active"]
+    notes_zh: >-
+      list_price_cents 是目录价，不是成交价；任何成交额计算都不得使用该列。
+
+  - id: orders
+    name_zh: "订单表（订单头）"
+    grain_zh: "一行 = 一张订单"
+    primary_key: ["order_id"]
+    columns:
+      ["order_id", "customer_id", "order_date", "status", "order_region", "order_channel"]
+    notes_zh: >-
+      订单头上故意没有金额列：这样「关联明细后再对订单级金额求和」这个重复累计错误在结构上就写不出来。order_region 是订单发生时的地区。
+
+  - id: order_items
+    name_zh: "订单明细表"
+    grain_zh: "一行 = 一张订单中的一个商品行"
+    primary_key: ["order_item_id"]
+    columns: ["order_item_id", "order_id", "product_id", "quantity", "unit_price_cents"]
+    notes_zh: >-
+      UNIQUE(order_id, product_id)：同一商品在同一订单内只出现一行。行金额不落库，由视图派生为 quantity * unit_price_cents。
+
+relationships:
+  - id: orders__customers
+    name_zh: "订单 → 客户"
+    from_table: orders
+    from_columns: ["customer_id"]
+    to_table: customers
+    to_columns: ["customer_id"]
+    cardinality: many_to_one
+    fan_out: none
+    double_count_note_zh: >-
+      按 customers 主键关联，不会放大订单行数，关联前后 SUM(金额) 与 COUNT(DISTINCT order_id) 都必须保持不变（有测试守住）。注意：关联客户表后若按 signup_region 统计会得到与 order_region 不同的结果，这不是重复累计问题，而是用错了维度列。
+
+  - id: order_items__orders
+    name_zh: "订单明细 → 订单"
+    from_table: order_items
+    from_columns: ["order_id"]
+    to_table: orders
+    to_columns: ["order_id"]
+    cardinality: many_to_one
+    fan_out: none
+    double_count_note_zh: >-
+      正向 order_items LEFT JOIN orders 是 many_to_one，不会复制左侧 order_items 输入行，所以 fan_out 为 none。反向粒度关系是一张订单对应多行明细：订单头字段被投影到多条既有明细行后会重复出现，但这不是正向连接对左侧行的放大。因此（1）订单数必须 COUNT(DISTINCT order_id)，在明细粒度上 COUNT(*) 得到的是明细行数；（2）若订单头将来新增金额列，把它带到明细粒度后也绝不能直接 SUM。手工 fixture 在该粒度有 9 行明细但只有 5 张有效订单，测试 test_orders_are_counted_once_regardless_of_line_count 专门守住这一点。
+
+  - id: order_items__products
+    name_zh: "订单明细 → 商品"
+    from_table: order_items
+    from_columns: ["product_id"]
+    to_table: products
+    to_columns: ["product_id"]
+    cardinality: many_to_one
+    fan_out: none
+    double_count_note_zh: >-
+      按 products 主键关联，不会放大明细行数，关联前后 SUM(line_amount_cents) 必须完全相等。但由此得到的 category 是明细行粒度维度：金额按类别可加，订单数按类别不可加。
+
+analysis_views:
+  - id: v_order_lines
+    name_zh: "全状态订单明细视图"
+    base_grain: order_line
+    source_tables: ["order_items", "orders", "products"]
+    status_filter: []
+    columns:
+      - order_item_id
+      - order_id
+      - order_date
+      - order_month
+      - status
+      - order_region
+      - order_channel
+      - customer_id
+      - product_id
+      - product_name
+      - category
+      - quantity
+      - unit_price_cents
+      - line_amount_cents
+    additive_columns: ["quantity", "line_amount_cents"]
+    distinct_count_columns: ["order_id", "customer_id", "product_id"]
+    usage_notes_zh: >-
+      包含全部状态，用于状态结构分析（例如取消率的分母）。不要用它计算成交额：它没有做状态过滤。
+
+  - id: v_revenue_lines
+    name_zh: "有效订单明细视图（规范基表）"
+    base_grain: order_line
+    source_tables: ["order_items", "orders", "products"]
+    status_filter: ["paid", "completed"]
+    columns:
+      - order_item_id
+      - order_id
+      - order_date
+      - order_month
+      - status
+      - order_region
+      - order_channel
+      - customer_id
+      - product_id
+      - product_name
+      - category
+      - quantity
+      - unit_price_cents
+      - line_amount_cents
+    additive_columns: ["quantity", "line_amount_cents"]
+    distinct_count_columns: ["order_id", "customer_id", "product_id"]
+    usage_notes_zh: >-
+      所有 v1 指标的规范基表。金额用 SUM(line_amount_cents)，订单数用 COUNT(DISTINCT order_id)。
+
+  - id: v_revenue_orders
+    name_zh: "有效订单视图（订单粒度）"
+    base_grain: order
+    source_tables: ["order_items", "orders", "products"]
+    status_filter: ["paid", "completed"]
+    columns:
+      - order_id
+      - order_date
+      - order_month
+      - status
+      - order_region
+      - order_channel
+      - customer_id
+      - order_amount_cents
+      - item_quantity
+      - line_count
+    additive_columns: ["order_amount_cents", "item_quantity", "line_count"]
+    distinct_count_columns: ["order_id", "customer_id"]
+    usage_notes_zh: >-
+      需要订单级金额时使用（分布、分位数）。在此粒度 COUNT(*) 等于有效订单数，SUM(order_amount_cents) 必须与明细粒度的成交额完全一致（有测试守住）。

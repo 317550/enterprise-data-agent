@@ -13,6 +13,7 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PACKAGE_ROOT = PROJECT_ROOT / "eda"
+SEMANTIC_ROOT = PROJECT_ROOT / "semantic"
 
 #: Names that would let model-produced text become executable code.
 FORBIDDEN_CALLS = {"eval", "exec", "compile", "__import__"}
@@ -125,6 +126,30 @@ def test_expected_answers_are_not_baked_into_runtime_code(
     assert offenders == [], f"runtime code must not contain fixture answers: {offenders}"
 
 
+def test_semantic_config_contains_no_fixture_answers(expected_fixture_metrics) -> None:
+    """The semantic layer declares 口径, never the answers to evaluation questions."""
+    forbidden = _expected_numbers(expected_fixture_metrics)
+    offenders = [
+        f"{path.name}: {number}"
+        for path in sorted(SEMANTIC_ROOT.glob("*.yaml"))
+        for number in sorted(forbidden)
+        if str(number) in path.read_text(encoding="utf-8")
+    ]
+    assert offenders == [], f"semantic config must not contain fixture answers: {offenders}"
+
+
+def test_semantic_config_declares_no_executable_expression(expected_fixture_metrics) -> None:
+    """Business definitions are declarative: no SQL fragments, no Python in YAML."""
+    banned = ("!!python", "lambda", "eval(", "exec(", "__import__", "${")
+    offenders = [
+        f"{path.name}: {token}"
+        for path in sorted(SEMANTIC_ROOT.glob("*.yaml"))
+        for token in banned
+        if token in path.read_text(encoding="utf-8")
+    ]
+    assert offenders == [], f"semantic config must stay declarative: {offenders}"
+
+
 def _docstring_nodes(tree: ast.Module) -> set[int]:
     """ids of the Constant nodes that are docstrings, so prose can be skipped."""
     ids: set[int] = set()
@@ -141,6 +166,22 @@ def _docstring_nodes(tree: ast.Module) -> set[int]:
         ):
             ids.add(id(body[0].value))
     return ids
+
+
+def test_runtime_code_never_reads_the_held_out_evaluation_set() -> None:
+    """The held-out set must never reach a prompt, an example store or the agent.
+
+    The directory does not exist yet (it is built in stage 6); this guard is in
+    place now so it fails the moment someone wires it into runtime code.
+    """
+    needles = ("evaluation/heldout", "evaluation\\heldout", "heldout")
+    offenders = [
+        f"{path.relative_to(PROJECT_ROOT).as_posix()}: {needle}"
+        for path in _python_files()
+        for needle in needles
+        if needle in path.read_text(encoding="utf-8")
+    ]
+    assert offenders == [], f"runtime code must not touch the held-out set: {offenders}"
 
 
 def test_runtime_code_never_reads_the_test_expectations() -> None:

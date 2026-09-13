@@ -1,0 +1,109 @@
+# ---------------------------------------------------------------------------
+# 语义层：维度定义
+#
+# 同 metrics.yaml：受控资产，不接收用户上传，加载时不使用 eval / exec。
+#
+# allowed_operations 是封闭枚举：
+#   group_by  -- 可作为拆分维度（当前由 build_breakdown_sql 实现）
+#   filter    -- 可作为筛选条件（当前由 MetricFilters 实现）
+# aov_display_name_zh 是按该维度拆分时 aov_cents 的业务展示名，只允许：
+#   客单价             -- month/date/region/channel 等整单互斥维度
+#   订单平均贡献额     -- category/product 等明细归属维度
+# 声明必须与代码实现一致，由 tests/test_semantic_consistency.py 校验：
+#   * 声明 group_by 的维度集合 == BREAKDOWN_DIMENSIONS 的键集合
+#   * 声明 filter   的维度集合 == MetricFilters 支持的筛选字段集合
+# 想新增筛选维度，必须同时改配置和代码，只改一边测试就会红。
+#
+# 中文长文本写成 ">-" 后的单行，避免 YAML 折叠标量插入多余空格。
+# ---------------------------------------------------------------------------
+schema_version: "1.0.0"
+
+notes_zh: >-
+  时间轴统一使用 orders.order_date（订单发生日期）。地区统一使用 orders.order_region（订单发生时的地区），绝不使用 customers.signup_region（客户注册地区）——客户迁移不应改写历史业绩。
+
+dimensions:
+  - id: month
+    name_zh: "月份"
+    synonyms: ["月份", "按月", "月度", "每月"]
+    source_view: v_revenue_lines
+    source_field: order_month
+    value_type: month
+    value_format: "YYYY-MM"
+    allowed_values: null
+    allowed_operations: ["group_by"]
+    aov_display_name_zh: "客单价"
+    notes_zh: >-
+      由 substr(order_date, 1, 7) 在视图里派生，避免每个查询各写一遍字符串截取。当前不支持直接按 month 筛选：限定月份请用 start_date / end_date 日期区间表达。
+
+  - id: date
+    name_zh: "日期"
+    synonyms: ["日期", "按天", "每天", "日粒度"]
+    source_view: v_revenue_lines
+    source_field: order_date
+    value_type: date
+    value_format: "YYYY-MM-DD"
+    allowed_values: null
+    allowed_operations: ["group_by"]
+    aov_display_name_zh: "客单价"
+    notes_zh: >-
+      按天拆分只会返回有有效订单的日期，没有订单的日期不会出现为 0 行。需要完整日历序列（补零）时必须在应用层补齐，阶段 1.1 未实现。
+
+  - id: region
+    name_zh: "地区"
+    synonyms: ["地区", "大区", "区域", "地域"]
+    source_view: v_revenue_lines
+    source_field: order_region
+    value_type: categorical
+    value_format: null
+    allowed_values: ["华东", "华北", "华南", "华中", "西南"]
+    allowed_operations: ["group_by", "filter"]
+    aov_display_name_zh: "客单价"
+    forbidden_source_fields: ["signup_region"]
+    notes_zh: >-
+      必须使用订单发生时的 orders.order_region，不得使用 customers.signup_region。两者在演示数据中约 9% 的订单不一致，用错列会直接得到错误的地区业绩。
+
+  - id: category
+    name_zh: "商品类别"
+    synonyms: ["类别", "品类", "商品类别", "类目"]
+    source_view: v_revenue_lines
+    source_field: category
+    value_type: categorical
+    value_format: null
+    allowed_values: ["手机数码", "家用电器", "服饰鞋包", "食品生鲜", "美妆个护", "家居日用"]
+    allowed_operations: ["group_by", "filter"]
+    aov_display_name_zh: "订单平均贡献额"
+    non_additive_metrics: ["valid_order_count", "distinct_customers"]
+    non_additive_note_zh: >-
+      按商品类别拆分时，一个订单可能横跨多个类别：各类别的有效订单成交额相加等于总成交额，但各类别的订单数相加会大于总订单数（每个类别统计的是「包含该类别商品的订单数」）。
+    notes_zh: >-
+      类别挂在商品上，因此是明细行粒度的维度。金额按类别可加；订单数与客户数按类别不可加（一张订单可横跨多个类别）。
+
+  - id: channel
+    name_zh: "渠道"
+    synonyms: ["渠道", "下单渠道", "端"]
+    source_view: v_revenue_lines
+    source_field: order_channel
+    value_type: categorical
+    value_format: null
+    allowed_values: ["web", "app", "mini_program"]
+    allowed_operations: ["group_by"]
+    aov_display_name_zh: "客单价"
+    forbidden_source_fields: ["signup_channel"]
+    notes_zh: >-
+      使用订单发生时的 orders.order_channel，不使用 customers.signup_channel（注册渠道）。
+
+  - id: product
+    name_zh: "商品"
+    synonyms: ["商品", "单品", "SKU", "商品名称"]
+    source_view: v_revenue_lines
+    source_field: product_name
+    value_type: categorical
+    value_format: null
+    allowed_values: null
+    allowed_operations: ["group_by"]
+    aov_display_name_zh: "订单平均贡献额"
+    non_additive_metrics: ["valid_order_count", "distinct_customers"]
+    non_additive_note_zh: >-
+      按商品拆分时，一个订单可能包含多个商品：各商品的有效订单成交额相加等于总成交额，但各商品的订单数相加会大于总订单数（每个商品统计的是「包含该商品的订单数」）。
+    notes_zh: >-
+      拆分时展示 product_name（演示数据中商品名唯一）。若将来出现同名不同 SKU，必须改为按 product_id 分组并附带名称，当前实现尚未处理这种情况。

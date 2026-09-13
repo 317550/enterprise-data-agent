@@ -7,7 +7,13 @@ from pydantic import SecretStr
 
 from eda.config import PROJECT_ROOT, Settings
 from eda.domain.enums import EXCLUDED_FROM_REVENUE_STATUSES, REVENUE_STATUSES
-from eda.metrics import METRIC_REGISTRY, MetricFilters, build_core_metrics_sql
+from eda.metrics import (
+    GMV_METRIC_ID,
+    METRIC_REGISTRY,
+    MetricFilters,
+    build_core_metrics_sql,
+    resolve_metric,
+)
 from eda.metrics.definitions import build_breakdown_sql
 
 
@@ -59,9 +65,22 @@ def test_every_metric_documents_its_definition() -> None:
 
 
 def test_revenue_definition_is_labelled_as_simplified_not_net() -> None:
-    revenue = METRIC_REGISTRY["revenue_cents"]
+    """Stage 1.1 renamed this metric; the stage 1 id still resolves to it."""
+    revenue = resolve_metric("revenue_cents")
+    assert revenue.key == GMV_METRIC_ID
     assert "简化" in revenue.name_zh or "简化" in " ".join(revenue.caveats)
     assert any("净收入" in caveat for caveat in revenue.caveats)
+
+
+def test_gmv_metric_is_named_effective_order_gmv() -> None:
+    """口径统一后的名称与说明（阶段 1.1 要求）。"""
+    gmv = METRIC_REGISTRY[GMV_METRIC_ID]
+    assert gmv.name_zh == "有效订单成交额（简化口径）"
+    assert "有效订单成交额" in gmv.synonyms
+    caveats = " ".join(gmv.caveats)
+    assert "部分退款" in caveats
+    assert "gross revenue" in caveats, "必须明确否认标准 gross revenue 口径"
+    assert "闭区间" in caveats, "日期区间的包含规则必须写明"
 
 
 def test_order_count_definition_insists_on_distinct() -> None:

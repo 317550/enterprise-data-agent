@@ -1,15 +1,39 @@
-# Direct dependencies, pinned to the versions actually installed and tested
-# on this machine (Windows 11, CPython 3.12.6, 2026-09-13).
+# DIRECT dependencies only, pinned to the versions actually installed and
+# verified on this machine (Windows 11, CPython 3.12.6).
 #
-# The full resolved tree (including transitive packages) is in
-# requirements.lock.txt. Version ranges for redistribution live in pyproject.toml.
+# Relationship between the two requirements files:
 #
-#   python -m venv .venv
+#   requirements.txt       -- hand-maintained list of the packages this project
+#                             imports directly. Short, reviewable, pinned with
+#                             '=='. Installing it lets pip resolve the
+#                             transitive tree itself, so versions of indirect
+#                             dependencies may differ from the verified run.
+#
+#   requirements.lock.txt  -- the FULL resolved environment, produced by
+#                             `pip freeze`. Plain 'name==version' lines, no
+#                             hashes, not a pip-tools/uv lock file. It is
+#                             platform specific (contains win_amd64 wheels such
+#                             as pyarrow and sqlite-vec) and was generated on
+#                             CPython 3.12.6 / Windows.
+#
+# Reproduce the exact verified environment (matches the lock file format):
+#
+#   py -3.12 -m venv .venv
+#   .venv\Scripts\python.exe -m pip install -r requirements.lock.txt
+#
+# Or install just the direct dependencies and let pip resolve the rest:
+#
 #   .venv\Scripts\python.exe -m pip install -r requirements.txt
+#
+# Regenerate the lock file after changing anything here:
+#
+#   .venv\Scripts\python.exe -m pip freeze > requirements.lock.txt
+#   .venv\Scripts\python.exe -m pip check
 
 pydantic==2.13.5
 pydantic-settings==2.15.0
 python-dotenv==1.2.3
+PyYAML==6.0.3
 sqlglot==30.18.0
 pandas==3.0.5
 plotly==7.0.0

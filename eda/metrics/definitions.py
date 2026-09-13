@@ -1,150 +1,150 @@
-"""Metric definitions: the single source of truth for 口径 (how a number is defined).
+"""Compiled metric definitions: semantic config in, SQL text out.
 
-This module produces SQL *text* and bound parameters. It never executes
-anything -- execution lives behind :mod:`eda.db` today and behind the safe
-executor from stage 2 onwards. Keeping definition and execution apart is what
-lets later stages reuse the exact same SQL the tests verify.
+Stage 1 kept the 口径 in hand-written Python literals here. Stage 1.1 moved the
+business definitions into ``semantic/*.yaml`` so there is exactly one
+authoritative statement of what a metric means. This module is now the *compiled
+view* of that config:
 
-The three v1 metrics
---------------------
-revenue_cents      SUM(quantity * unit_price_cents) over order lines whose order
-                   status is 'paid' or 'completed'. Simplified gross figure:
-                   refunds are NOT netted out, so this is 营业额, not 净收入.
-valid_order_count  COUNT(DISTINCT order_id) over the same base. Distinct, so a
-                   3-line order counts once.
-aov_cents          revenue_cents / valid_order_count; undefined (None) when the
-                   denominator is 0.
+    semantic/metrics.yaml        business definition (authoritative)
+        -> eda.semantic.loader   parse + Pydantic validation + cross-checks
+        -> eda.metrics.operations closed set of computation operations
+        -> METRIC_REGISTRY       MetricDefinition (spec + rendered SQL)
+
+The module still produces SQL *text* and bound parameters only. It never
+executes anything: execution lives behind :mod:`eda.db` today and behind the
+safe executor from stage 2 onwards.
 """
 
 from __future__ import annotations
 
+import datetime as dt
 from typing import Final
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
-from eda.domain.enums import (
-    EXCLUDED_FROM_REVENUE_STATUSES,
-    REVENUE_STATUSES,
-    Category,
-    Region,
-)
+from eda.metrics.operations import IMPLEMENTED_ANALYSIS_OPERATIONS, render_metric_sql
+from eda.semantic import MetricSpec, SemanticModel, load_semantic_model
 
-#: Canonical line-grain base view for every revenue number.
-REVENUE_BASE_VIEW: Final[str] = "v_revenue_lines"
+#: The loaded semantic model. Imported at module load so a broken config fails
+#: immediately and loudly rather than at the first query.
+SEMANTIC: Final[SemanticModel] = load_semantic_model()
+
+#: Canonical metric id for 有效订单成交额（简化口径）.
+GMV_METRIC_ID: Final[str] = "effective_order_gmv_cents"
+ORDER_COUNT_METRIC_ID: Final[str] = "valid_order_count"
+AOV_METRIC_ID: Final[str] = "aov_cents"
+
+#: Canonical line-grain base view for every 成交额 number.
+REVENUE_BASE_VIEW: Final[str] = SEMANTIC.metric(GMV_METRIC_ID).base_view
 #: Canonical order-grain base view, for order-level distributions.
 REVENUE_ORDER_VIEW: Final[str] = "v_revenue_orders"
 
 
 class MetricDefinition(BaseModel):
-    """Machine- and human-readable description of one metric."""
+    """One metric, as the query layer sees it: the spec plus its rendered SQL."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     key: str
     name_zh: str
+    #: Display unit, e.g. "分" / "单". ``unit_code`` is the machine-readable one.
     unit: str
+    unit_code: str
     grain: str
     base_view: str
     sql_expression: str
     definition_zh: str
     caveats: tuple[str, ...] = ()
+    synonyms: tuple[str, ...] = ()
+    legacy_ids: tuple[str, ...] = ()
+    allowed_dimensions: tuple[str, ...] = ()
+    supported_operations: tuple[str, ...] = ()
+    implemented_operations: tuple[str, ...] = ()
+    additive: bool = False
+    status_include: tuple[str, ...] = ()
+    status_exclude: tuple[str, ...] = ()
+    filter_policy_zh: str = ""
+    zero_denominator_note: str | None = None
+    spec: MetricSpec
+
+    @property
+    def pending_operations(self) -> tuple[str, ...]:
+        """Operations the metric supports in principle but that are 待实现."""
+        return tuple(
+            operation
+            for operation in self.supported_operations
+            if operation not in self.implemented_operations
+        )
 
 
-_REVENUE_STATUS_TEXT = " / ".join(REVENUE_STATUSES)
-_EXCLUDED_STATUS_TEXT = " / ".join(EXCLUDED_FROM_REVENUE_STATUSES)
-
-METRIC_REGISTRY: Final[dict[str, MetricDefinition]] = {
-    definition.key: definition
-    for definition in (
-        MetricDefinition(
-            key="revenue_cents",
-            name_zh="营业额（简化口径）",
-            unit="分",
-            grain="order line",
-            base_view=REVENUE_BASE_VIEW,
-            sql_expression="COALESCE(SUM(line_amount_cents), 0)",
-            definition_zh=(
-                f"状态为 {_REVENUE_STATUS_TEXT} 的订单，其订单明细金额"
-                "（数量 × 成交单价）之和。"
-            ),
-            caveats=(
-                f"{_EXCLUDED_STATUS_TEXT} 状态的订单整单排除。",
-                "不扣减退款金额，因此这是简化的营业额（gross），不是净收入（net revenue）。",
-                "使用成交单价 unit_price_cents，不使用商品目录价 list_price_cents。",
-            ),
+def _compile(spec: MetricSpec) -> MetricDefinition:
+    policy = spec.zero_denominator_policy
+    return MetricDefinition(
+        key=spec.id,
+        name_zh=spec.name_zh,
+        unit=spec.unit_zh,
+        unit_code=spec.unit,
+        grain=spec.grain,
+        base_view=spec.base_view,
+        sql_expression=render_metric_sql(spec, SEMANTIC.metric),
+        definition_zh=spec.definition_zh,
+        caveats=spec.caveats_zh,
+        synonyms=spec.synonyms,
+        legacy_ids=spec.legacy_ids,
+        allowed_dimensions=spec.allowed_dimensions,
+        supported_operations=spec.supported_operations,
+        implemented_operations=tuple(
+            operation
+            for operation in spec.supported_operations
+            if operation in IMPLEMENTED_ANALYSIS_OPERATIONS
         ),
-        MetricDefinition(
-            key="valid_order_count",
-            name_zh="有效订单量",
-            unit="单",
-            grain="order",
-            base_view=REVENUE_BASE_VIEW,
-            sql_expression="COUNT(DISTINCT order_id)",
-            definition_zh=(
-                f"状态为 {_REVENUE_STATUS_TEXT} 且至少包含一条明细的订单数，按 order_id 去重。"
-            ),
-            caveats=(
-                "必须 COUNT(DISTINCT order_id)；在明细粒度上 COUNT(*) 会把多行订单重复计数。",
-                "没有任何明细行的订单不计入（本项目的数据生成保证每单至少一行）。",
-            ),
+        additive=spec.additive,
+        status_include=spec.status_include,
+        status_exclude=spec.status_exclude,
+        filter_policy_zh=spec.filter_policy_zh,
+        zero_denominator_note=(
+            policy.note_zh if policy.strategy == "return_null_with_note" else None
         ),
-        MetricDefinition(
-            key="aov_cents",
-            name_zh="客单价",
-            unit="分/单",
-            grain="derived",
-            base_view=REVENUE_BASE_VIEW,
-            sql_expression=(
-                "CASE WHEN COUNT(DISTINCT order_id) = 0 THEN NULL "
-                "ELSE 1.0 * COALESCE(SUM(line_amount_cents), 0) / COUNT(DISTINCT order_id) END"
-            ),
-            definition_zh="营业额 ÷ 有效订单量。",
-            caveats=(
-                "分母为 0 时返回空值（NULL/None）并附带说明，不返回 0。",
-                "计算过程不做四舍五入；只有展示时才格式化为两位小数的元。",
-            ),
-        ),
-        MetricDefinition(
-            key="item_quantity",
-            name_zh="有效销量",
-            unit="件",
-            grain="order line",
-            base_view=REVENUE_BASE_VIEW,
-            sql_expression="COALESCE(SUM(quantity), 0)",
-            definition_zh=f"状态为 {_REVENUE_STATUS_TEXT} 的订单明细数量之和。",
-        ),
-        MetricDefinition(
-            key="distinct_customers",
-            name_zh="下单客户数",
-            unit="人",
-            grain="customer",
-            base_view=REVENUE_BASE_VIEW,
-            sql_expression="COUNT(DISTINCT customer_id)",
-            definition_zh=f"状态为 {_REVENUE_STATUS_TEXT} 的订单所涉及的去重客户数。",
-        ),
+        spec=spec,
     )
+
+
+#: Keyed by canonical metric id only, so ``definition.key == key`` always holds.
+#: Use :func:`resolve_metric` to look something up by legacy id or synonym.
+METRIC_REGISTRY: Final[dict[str, MetricDefinition]] = {
+    spec.id: _compile(spec) for spec in SEMANTIC.metrics
 }
 
-#: Dimension name -> column in ``v_revenue_lines``. A strict allow-list: the
-#: dimension never reaches the SQL string unless it is a key of this mapping.
+
+def resolve_metric(name: str) -> MetricDefinition:
+    """Look a metric up by canonical id, legacy id or Chinese synonym."""
+    return METRIC_REGISTRY[SEMANTIC.metric(name).id]
+
+
+#: Dimension id -> column in the base view. Derived from the semantic config:
+#: exactly those dimensions that declare the ``group_by`` operation. A strict
+#: allow-list -- a dimension never reaches the SQL string unless it is a key here.
 BREAKDOWN_DIMENSIONS: Final[dict[str, str]] = {
-    "month": "order_month",
-    "date": "order_date",
-    "region": "order_region",
-    "category": "category",
-    "channel": "order_channel",
-    "product": "product_name",
+    dimension.id: dimension.source_field
+    for dimension in SEMANTIC.dimensions_supporting("group_by")
 }
+
+#: Dimension ids that may be used as a filter. Must match the fields of
+#: :class:`MetricFilters`; ``tests/test_semantic_consistency.py`` asserts it.
+FILTER_DIMENSIONS: Final[tuple[str, ...]] = tuple(
+    dimension.id for dimension in SEMANTIC.dimensions_supporting("filter")
+)
 
 _CORE_METRIC_KEYS: Final[tuple[str, ...]] = (
-    "revenue_cents",
-    "valid_order_count",
+    GMV_METRIC_ID,
+    ORDER_COUNT_METRIC_ID,
     "item_quantity",
     "distinct_customers",
 )
 
 #: Shared WHERE clause. ``:region`` / ``:category`` are optional filters: when
 #: bound to NULL the condition is a no-op, so one SQL string covers all cases.
+#: The date range is a closed interval -- both endpoints are included.
 _WHERE = (
     "WHERE order_date >= :start_date\n"
     "  AND order_date <= :end_date\n"
@@ -153,8 +153,23 @@ _WHERE = (
 )
 
 
+def _validate_dimension_value(dimension_id: str, value: str) -> str:
+    """Check a filter value against the allowed values in the semantic config."""
+    dimension = SEMANTIC.dimension(dimension_id)
+    allowed = dimension.allowed_values
+    if allowed is not None and value not in allowed:
+        raise ValueError(
+            f"unknown {dimension_id} value {value!r}; allowed: {list(allowed)}"
+        )
+    return value
+
+
 class MetricFilters(BaseModel):
-    """Time range plus optional slicing. ``end_date`` is inclusive."""
+    """Time range plus optional slicing.
+
+    The date range is a **closed interval**: an order dated exactly
+    ``start_date`` or exactly ``end_date`` is included.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -166,20 +181,18 @@ class MetricFilters(BaseModel):
     @field_validator("start_date", "end_date")
     @classmethod
     def _iso_date(cls, value: str) -> str:
-        import datetime as dt
-
         dt.date.fromisoformat(value)
         return value
 
     @field_validator("region")
     @classmethod
     def _known_region(cls, value: str | None) -> str | None:
-        return None if value is None else Region(value).value
+        return None if value is None else _validate_dimension_value("region", value)
 
     @field_validator("category")
     @classmethod
     def _known_category(cls, value: str | None) -> str | None:
-        return None if value is None else Category(value).value
+        return None if value is None else _validate_dimension_value("category", value)
 
     @model_validator(mode="after")
     def _ordered(self) -> MetricFilters:
@@ -196,11 +209,10 @@ class MetricFilters(BaseModel):
         }
 
     def describe_zh(self) -> str:
-        parts = [f"{self.start_date} 至 {self.end_date}"]
-        if self.region:
-            parts.append(f"地区={self.region}")
-        if self.category:
-            parts.append(f"类别={self.category}")
+        parts = [f"{self.start_date} 至 {self.end_date}（含端点）"]
+        for dimension_id, value in (("region", self.region), ("category", self.category)):
+            if value:
+                parts.append(f"{SEMANTIC.dimension(dimension_id).name_zh}={value}")
         return "，".join(parts)
 
 
@@ -216,7 +228,7 @@ def build_core_metrics_sql(filters: MetricFilters) -> tuple[str, dict[str, objec
 def build_breakdown_sql(
     dimension: str, filters: MetricFilters, *, limit: int | None = None
 ) -> tuple[str, dict[str, object]]:
-    """SQL for revenue / orders / AOV grouped by one allow-listed dimension."""
+    """SQL for 成交额 / 有效订单数 / 客单价 grouped by one allow-listed dimension."""
     try:
         column = BREAKDOWN_DIMENSIONS[dimension]
     except KeyError:
@@ -225,16 +237,19 @@ def build_breakdown_sql(
             f"allowed: {sorted(BREAKDOWN_DIMENSIONS)}"
         ) from None
 
+    gmv = METRIC_REGISTRY[GMV_METRIC_ID]
+    orders = METRIC_REGISTRY[ORDER_COUNT_METRIC_ID]
+    aov = METRIC_REGISTRY[AOV_METRIC_ID]
     sql = (
         f"SELECT\n"
         f"    {column} AS dimension_value,\n"
-        f"    {METRIC_REGISTRY['revenue_cents'].sql_expression} AS revenue_cents,\n"
-        f"    {METRIC_REGISTRY['valid_order_count'].sql_expression} AS valid_order_count,\n"
-        f"    {METRIC_REGISTRY['aov_cents'].sql_expression} AS aov_cents\n"
+        f"    {gmv.sql_expression} AS {gmv.key},\n"
+        f"    {orders.sql_expression} AS {orders.key},\n"
+        f"    {aov.sql_expression} AS {aov.key}\n"
         f"FROM {REVENUE_BASE_VIEW}\n"
         f"{_WHERE}\n"
         f"GROUP BY {column}\n"
-        f"ORDER BY revenue_cents DESC, dimension_value ASC"
+        f"ORDER BY {gmv.key} DESC, dimension_value ASC"
     )
     params = filters.as_params()
     if limit is not None:
