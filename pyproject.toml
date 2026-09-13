@@ -1,0 +1,46 @@
+[project]
+name = "enterprise-data-agent"
+version = "0.1.0"
+description = "Read-only business data analysis agent (LangGraph + DeepSeek + SQLite). Local portfolio project, not production ready."
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+
+# Version ranges below were chosen against the versions actually installed and
+# tested on this machine (see requirements.lock.txt and docs/progress.md).
+# Upper bounds are deliberate: nothing here floats to an untested major version.
+dependencies = [
+    "pydantic>=2.11,<3",
+    "pydantic-settings>=2.8,<3",
+    "python-dotenv>=1.0,<2",
+    "sqlglot>=27,<31",
+    "pandas>=2.2,<4",
+    "plotly>=6,<8",
+    "streamlit>=1.40,<2",
+    "langgraph>=1.0,<2",
+    "langgraph-checkpoint-sqlite>=3,<4",
+    "openai>=1.60,<4",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["eda", "eda.data", "eda.domain", "eda.metrics"]
+
+[tool.setuptools.package-data]
+"eda.data" = ["schema.sql", "fixtures/*.csv"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+# The package is importable straight from the repo root; no install step needed.
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
+filterwarnings = ["error"]
+markers = [
+    "live_llm: hits the real DeepSeek API. Deselected by default; must be run explicitly by a human.",
+]

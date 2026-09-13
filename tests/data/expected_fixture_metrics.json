@@ -1,0 +1,125 @@
+{
+  "_about": [
+    "Hand-computed expectations for the fixture dataset in eda/data/fixtures/*.csv.",
+    "This file is a TEST ASSET. It must never be imported by runtime code under eda/.",
+    "The full pen-and-paper derivation is written out in docs/metrics.md; if you",
+    "change a fixture CSV you must redo that derivation by hand and update this file.",
+    "All money values are integer cents (分)."
+  ],
+  "dataset_row_counts": {
+    "customers": 4,
+    "products": 5,
+    "orders": 8,
+    "order_items": 12
+  },
+  "revenue_line_count": 9,
+  "all_status_line_amount_cents": 904900,
+  "excluded_orders": [
+    { "order_id": "O003", "status": "cancelled", "line_amount_cents": 129900 },
+    { "order_id": "O005", "status": "pending", "line_amount_cents": 199900 },
+    { "order_id": "O006", "status": "refunded", "line_amount_cents": 119900 }
+  ],
+  "revenue_order_amounts_cents": {
+    "O001": 33300,
+    "O002": 189900,
+    "O004": 46200,
+    "O007": 42000,
+    "O008": 143800
+  },
+  "scenarios": [
+    {
+      "name": "full_window",
+      "filters": { "start_date": "2024-01-01", "end_date": "2024-12-31" },
+      "revenue_cents": 455200,
+      "valid_order_count": 5,
+      "item_quantity": 22,
+      "distinct_customers": 4,
+      "exact_aov_cents": 91040
+    },
+    {
+      "name": "january_only",
+      "filters": { "start_date": "2024-01-01", "end_date": "2024-01-31" },
+      "revenue_cents": 223200,
+      "valid_order_count": 2,
+      "item_quantity": 6,
+      "distinct_customers": 2,
+      "exact_aov_cents": 111600
+    },
+    {
+      "name": "february_only",
+      "filters": { "start_date": "2024-02-01", "end_date": "2024-02-29" },
+      "revenue_cents": 232000,
+      "valid_order_count": 3,
+      "item_quantity": 16,
+      "distinct_customers": 3,
+      "exact_aov_cents": null
+    },
+    {
+      "name": "region_east",
+      "filters": { "start_date": "2024-01-01", "end_date": "2024-12-31", "region": "华东" },
+      "revenue_cents": 223300,
+      "valid_order_count": 3,
+      "item_quantity": 11,
+      "distinct_customers": 2,
+      "exact_aov_cents": null
+    },
+    {
+      "name": "category_food_fresh",
+      "filters": { "start_date": "2024-01-01", "end_date": "2024-12-31", "category": "食品生鲜" },
+      "revenue_cents": 60400,
+      "valid_order_count": 3,
+      "item_quantity": 14,
+      "distinct_customers": 2,
+      "exact_aov_cents": null
+    },
+    {
+      "name": "single_day_2024_02_20",
+      "filters": { "start_date": "2024-02-20", "end_date": "2024-02-20" },
+      "revenue_cents": 42000,
+      "valid_order_count": 1,
+      "item_quantity": 10,
+      "distinct_customers": 1,
+      "exact_aov_cents": 42000
+    },
+    {
+      "name": "empty_window_2023",
+      "filters": { "start_date": "2023-01-01", "end_date": "2023-12-31" },
+      "revenue_cents": 0,
+      "valid_order_count": 0,
+      "item_quantity": 0,
+      "distinct_customers": 0,
+      "exact_aov_cents": null
+    },
+    {
+      "name": "empty_region_central",
+      "filters": { "start_date": "2024-01-01", "end_date": "2024-12-31", "region": "华中" },
+      "revenue_cents": 0,
+      "valid_order_count": 0,
+      "item_quantity": 0,
+      "distinct_customers": 0,
+      "exact_aov_cents": null
+    }
+  ],
+  "breakdowns": {
+    "month": [
+      { "dimension_value": "2024-01", "revenue_cents": 223200, "valid_order_count": 2 },
+      { "dimension_value": "2024-02", "revenue_cents": 232000, "valid_order_count": 3 }
+    ],
+    "region": [
+      { "dimension_value": "华东", "revenue_cents": 223300, "valid_order_count": 3 },
+      { "dimension_value": "华北", "revenue_cents": 189900, "valid_order_count": 1 },
+      { "dimension_value": "西南", "revenue_cents": 42000, "valid_order_count": 1 }
+    ],
+    "category": [
+      { "dimension_value": "手机数码", "revenue_cents": 219200, "valid_order_count": 3 },
+      { "dimension_value": "食品生鲜", "revenue_cents": 60400, "valid_order_count": 3 },
+      { "dimension_value": "服饰鞋包", "revenue_cents": 50600, "valid_order_count": 2 },
+      { "dimension_value": "家用电器", "revenue_cents": 125000, "valid_order_count": 1 }
+    ],
+    "channel": [
+      { "dimension_value": "app", "revenue_cents": 231900, "valid_order_count": 2 },
+      { "dimension_value": "web", "revenue_cents": 223300, "valid_order_count": 3 }
+    ]
+  },
+  "category_order_count_sum": 9
+}

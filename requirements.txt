@@ -1,0 +1,22 @@
+# Direct dependencies, pinned to the versions actually installed and tested
+# on this machine (Windows 11, CPython 3.12.6, 2026-09-13).
+#
+# The full resolved tree (including transitive packages) is in
+# requirements.lock.txt. Version ranges for redistribution live in pyproject.toml.
+#
+#   python -m venv .venv
+#   .venv\Scripts\python.exe -m pip install -r requirements.txt
+
+pydantic==2.13.5
+pydantic-settings==2.15.0
+python-dotenv==1.2.3
+sqlglot==30.18.0
+pandas==3.0.5
+plotly==7.0.0
+streamlit==1.63.0
+langgraph==1.2.11
+langgraph-checkpoint-sqlite==3.1.1
+openai==3.13.0
+
+# --- development / test ---
+pytest==9.1.1

@@ -1,0 +1,42 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+
+# --- Secrets / local config ---
+# Never commit real credentials. Only .env.example is tracked.
+.env
+.env.*
+!.env.example
+
+# --- Local databases (generated, reproducible) ---
+# Anchored to the repo root so that the tracked package dir eda/data/ is kept.
+/data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# --- Test / tooling caches ---
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+.coverage.*
+
+# --- Editors / OS ---
+.idea/
+.vscode/
+Thumbs.db
+desktop.ini

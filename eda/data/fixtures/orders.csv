@@ -1,0 +1,9 @@
+order_id,customer_id,order_date,status,order_region,order_channel
+O001,C001,2024-01-05,paid,华东,web
+O002,C002,2024-01-12,completed,华北,app
+O003,C003,2024-01-20,cancelled,华南,app
+O004,C001,2024-02-02,completed,华东,web
+O005,C004,2024-02-08,pending,华东,mini_program
+O006,C002,2024-02-14,refunded,华北,app
+O007,C003,2024-02-20,paid,西南,app
+O008,C004,2024-02-28,completed,华东,web
