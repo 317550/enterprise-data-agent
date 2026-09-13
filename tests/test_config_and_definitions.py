@@ -52,6 +52,13 @@ def test_invalid_demo_date_is_rejected() -> None:
         Settings(_env_file=None, demo_start_date="2024-13-01")
 
 
+def test_sql_value_byte_limit_must_be_positive() -> None:
+    with pytest.raises(ValueError):
+        Settings(_env_file=None, sql_max_value_bytes=0)
+    settings = Settings(_env_file=None)
+    assert settings.sql_max_value_bytes == 4096
+
+
 def test_revenue_status_classification_is_exhaustive_and_disjoint() -> None:
     assert set(REVENUE_STATUSES) == {"paid", "completed"}
     assert set(REVENUE_STATUSES) & set(EXCLUDED_FROM_REVENUE_STATUSES) == set()

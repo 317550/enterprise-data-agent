@@ -13,7 +13,6 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from pydantic import BaseModel, ConfigDict
 
-from eda.db import fetch_all, fetch_one
 from eda.metrics.definitions import (
     AOV_METRIC_ID,
     GMV_METRIC_ID,
@@ -138,10 +137,17 @@ def compute_core_metrics(conn: sqlite3.Connection, filters: MetricFilters) -> Co
     for metric_id in (GMV_METRIC_ID, ORDER_COUNT_METRIC_ID, AOV_METRIC_ID):
         require_implemented_analysis_operation(METRIC_REGISTRY[metric_id].spec, "total")
 
+    from eda.sql.executor import execute_on_connection, require_ok
+
     sql, params = build_core_metrics_sql(filters)
-    row = fetch_one(conn, sql, params)
-    if row is None:  # aggregate query without GROUP BY always returns one row
+    executed = require_ok(execute_on_connection(conn, sql, params))
+    if executed.truncated:
+        from eda.query.errors import QueryError
+
+        raise QueryError("resource_limit", "legacy report cannot represent truncated results")
+    if not executed.rows:
         raise RuntimeError("core metrics query returned no row")
+    row = dict(zip(executed.columns, executed.rows[0], strict=True))
 
     gmv_cents = int(row[GMV_METRIC_ID])
     valid_order_count = int(row[ORDER_COUNT_METRIC_ID])
@@ -177,7 +183,14 @@ def compute_breakdown(
     for metric_id in BREAKDOWN_METRIC_IDS:
         require_implemented_analysis_operation(METRIC_REGISTRY[metric_id].spec, "breakdown")
 
+    from eda.sql.executor import execute_on_connection, require_ok
+
     sql, params = build_breakdown_sql(dimension, filters, limit=limit)
+    executed = require_ok(execute_on_connection(conn, sql, params))
+    if executed.truncated:
+        from eda.query.errors import QueryError
+
+        raise QueryError("resource_limit", "legacy report cannot represent truncated results")
     rows = tuple(
         BreakdownRow(
             dimension_value=str(row["dimension_value"]),
@@ -185,7 +198,9 @@ def compute_breakdown(
             valid_order_count=int(row[ORDER_COUNT_METRIC_ID]),
             aov_cents=None if row[AOV_METRIC_ID] is None else float(row[AOV_METRIC_ID]),
         )
-        for row in fetch_all(conn, sql, params)
+        for row in (
+            dict(zip(executed.columns, raw, strict=True)) for raw in executed.rows
+        )
     )
 
     # The warning about non-additive order counts is declared on the dimension

@@ -167,7 +167,9 @@ aov_cents = effective_order_gmv_cents / valid_order_count
   说明文字声明在 `semantic/metrics.yaml` 的
   `aov_cents.zero_denominator_policy.note_zh`，代码里的
   `eda.metrics.core.AOV_UNDEFINED_NOTE` 直接读取它，两者不可能不一致；
-- 除法在 Python 中用两个精确整数完成，避免 SQL 里意外发生整除；
+- 核心总量报表在 Python 中对两个精确整数做除法；阶段二计划与拆分 SQL 使用
+  `CASE` 保护零分母并通过 `1.0 * 分子 / 分母` 明确做浮点除法，避免整除。
+  金额求和与去重计数保持整数，比率展示使用浮点结果；
 - 计算过程不做四舍五入，只有展示时才格式化为两位小数的「元」；
 - 按 `region` / `channel` / `month` / `date` 拆分时，每张订单只属于一个维度值，
   报表继续展示为**「客单价」**；

@@ -32,7 +32,16 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["eda", "eda.data", "eda.domain", "eda.metrics", "eda.semantic"]
+packages = [
+    "eda",
+    "eda.data",
+    "eda.domain",
+    "eda.metrics",
+    "eda.semantic",
+    "eda.plan",
+    "eda.sql",
+    "eda.query",
+]
 
 [tool.setuptools.package-data]
 "eda.data" = ["schema.sql", "fixtures/*.csv"]

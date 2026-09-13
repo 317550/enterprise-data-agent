@@ -12,8 +12,9 @@
 
 自由 Text-to-SQL 在本项目中**只作为评测基线**，不是默认执行路径。
 
-**当前进度：阶段 1 + 阶段 1.1 已完成**（数据基础、版本化语义层、人工 fixture、
-评测划分规范）。目前不调用任何 LLM，也不包含 LangGraph 与 Web 界面。
+**当前进度：阶段 1 + 阶段 1.1 + 阶段 2 已完成**（数据基础、版本化语义层、
+人工 fixture、AnalysisPlan 闭环与统一只读安全执行器）。目前不调用任何 LLM，
+也不包含 LangGraph 与 Web 界面。
 完整分阶段状态与逐项追踪表见 [`docs/progress.md`](docs/progress.md)。
 
 ---
@@ -45,7 +46,7 @@
 | 解释器 | `.venv\Scripts\python.exe`，CPython 3.12.6 |
 | SQLite | 3.45.3（CPython 3.12.6 自带） |
 | `pip check` | `No broken requirements found.` |
-| `pytest -q` | **226 passed** |
+| `pytest -q` | **374 passed**（阶段二独立审查后） |
 
 其他平台、其他 Python 版本（含计划里的 3.11）**均未验证**。
 
@@ -99,6 +100,10 @@ copy .env.example .env
 :: 6) 只读报表（人工核对口径，不走 LLM）
 .venv\Scripts\python.exe -m eda.metrics.report --db data\fixture.db --show-definitions
 .venv\Scripts\python.exe -m eda.metrics.report --start 2024-06-01 --end 2024-06-30 --by region
+
+:: 7) 阶段 2：用结构化 AnalysisPlan 跑安全查询闭环（不走 LLM）
+.venv\Scripts\python.exe -m eda.query.cli --plan examples\plans\fixture_gmv_total.json --db data\fixture.db
+.venv\Scripts\python.exe -m eda.query.cli --plan examples\plans\fixture_gmv_by_category.json --db data\fixture.db
 ```
 
 > 控制台中文乱码时，先执行 `chcp 65001`。
@@ -170,6 +175,10 @@ enterprise_data_agent/
     domain/                # 受控词表 + Pydantic 行模型
     data/                  # DDL、手工 fixture、演示数据生成器、建库 CLI
     metrics/               # 封闭计算操作、语义层编译产物、指标计算、只读报表 CLI
+    plan/                  # AnalysisPlan：业务请求是否合法
+    sql/                   # 确定性编译、SQLGlot 校验、authorizer、执行策略
+    query/                 # 计划闭环服务与薄 CLI
+  examples/plans/          # 手工可跑的 AnalysisPlan JSON
   tests/                   # pytest；不访问网络，不调用 LLM
     data/expected_fixture_metrics.json   # 人工推导的期望值（测试资产）
   docs/
@@ -186,9 +195,10 @@ enterprise_data_agent/
 1. 不执行模型生成的 Python / shell / 任意代码；无 `eval` / `exec` / `compile` / `subprocess`
    —— 由 `tests/test_project_constraints.py` 在语法树上逐文件强制。
    语义配置同样是纯声明式，不含任何可执行表达式（有测试断言）。
-2. SQL 只有一条执行通道：`eda/db.py` 是唯一出现 `sqlite3.connect` 的模块（有测试守住），
-   阶段 2 会在其上加安全执行器。
-3. 不靠 `SELECT` 前缀或正则判断 SQL 安全性；阶段 2 使用 SQLGlot 解析 AST。
+2. SQL 只有一条连接通道：`eda/db.py` 是唯一出现 `sqlite3.connect` 的模块（有测试守住）。
+   分析查询的执行策略在 `eda/sql/executor.py`，它只调用该受控只读工厂。
+3. 不靠 `SELECT` 前缀或正则判断 SQL 安全性；用 SQLGlot 解析 AST，再用 SQLite
+   authorizer 做执行层默认拒绝。资源限制是进程内尽力而为，不是 OS 沙箱。
 4. SQL 可执行不等于业务答案正确：正确性由手工 fixture 与人工推导的期望值判定。
 5. 运行时代码与语义配置中都没有硬编码的题目、期望 SQL 或期望答案（有测试反向扫描）。
 6. 不为了通过测试而删弱测试、改答案或吞异常。

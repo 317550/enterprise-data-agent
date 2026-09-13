@@ -2,10 +2,16 @@
 
 分阶段实施，每阶段完成后停下来交付、复核，再进入下一阶段。
 
+2026-09-13 阶段二独立审查：亲自复现基线 311 passed，定向修复后完整测试
+374 passed（exit 0）；pip check / git diff --check 均通过。两项示例输出正确，
+business.db 与 fixture.db 的 SHA256 / mtime 均未变化。旧记录中“空 dbname
+视为 main”的结论已由受连接拓扑约束的兼容替代，详见
+[独立审查记录](stage2-review.md)。未提交、推送、切换分支或进入阶段三。
+
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | 1 | 数据基础、语义定义、人工 fixture 与评测划分规则 | ✅ 已完成（阶段 1 + 阶段 1.1，2026-09-13） |
-| 2 | 结构化 AnalysisPlan 校验、确定性 SQL 编译器、统一只读安全执行器 | ⬜ 未开始 |
+| 2 | 结构化 AnalysisPlan 校验、确定性 SQL 编译器、统一只读安全执行器 | ✅ 已完成（2026-09-13） |
 | 3 | LangGraph 单轮指标查询、口径澄清与有限错误处理 | ⬜ 未开始 |
 | 4 | 有限多步对比与贡献拆解、多轮追问与持久化 | ⬜ 未开始 |
 | 5 | 结论证据校验、受控图表、Streamlit 界面与运行记录 | ⬜ 未开始 |
@@ -34,7 +40,7 @@
 | 固定种子演示数据、不依赖机器日期 | `eda/data/generator.py` | `test_generator.py` | ✅ |
 | 建库脚本、默认拒绝覆盖 | `eda/data/build_db.py` | `test_build_db.py` | ✅ |
 | 只读连接（mode=ro + query_only） | `eda/db.py` | `test_schema_constraints.py` | ✅ |
-| 单一 SQL 执行入口 | `eda/db.py` | `test_project_constraints.py::test_sqlite_connect_lives_only_in_eda_db` | ✅ |
+| 单一 SQL 连接入口 | `eda/db.py`（`sqlite3.connect` 仅此文件） | `test_project_constraints.py::test_sqlite_connect_lives_only_in_eda_db` | ✅ |
 
 ### 语义层（阶段 1.1）
 
@@ -57,15 +63,24 @@
 | 演示数据只声明覆盖范围，不声明每日完整 | `semantic/dimensions.yaml`（date 维度说明） | `test_semantic_consistency.py::test_date_breakdown_only_returns_days_that_have_orders` | ✅ |
 | 评测划分规范（fixture / dev / heldout） | `evaluation/README.md` | `test_project_constraints.py::test_runtime_code_never_reads_the_held_out_evaluation_set` | ✅（规范已定，数据集待建） |
 
+### 安全查询执行（阶段 2）
+
+| 需求 | 代码 | 测试 | 状态 |
+|---|---|---|---|
+| AnalysisPlan schema 与语义校验（`total` / `breakdown` / 简单排名） | `eda/plan/models.py` | `tests/test_analysis_plan.py` | ✅ |
+| 确定性 AnalysisPlan → 参数化 SQL 编译 | `eda/sql/compiler.py` | `tests/test_sql_compiler.py` | ✅ |
+| SQLGlot AST 结构与对象访问校验 | `eda/sql/validator.py`、`eda/sql/catalog.py` | `tests/test_sql_validator.py` | ✅ |
+| SQLite authorizer 默认拒绝 | `eda/sql/authorizer.py` | `tests/test_sql_executor.py` | ✅ |
+| 统一只读执行策略（行数/字节/超时/SQL 长度） | `eda/sql/executor.py`（只调用 `eda.db.connect_readonly`） | `tests/test_sql_executor.py` | ✅ |
+| 结构化结果 + 完整性标记（top_n ≠ 截断） | `eda/query/service.py`、`eda/query/models.py` | `tests/test_query_service.py` | ✅ |
+| 薄 CLI：读计划 JSON，打印结果 | `eda/query/cli.py`、`examples/plans/` | `tests/test_query_cli.py` | ✅ |
+| 现有 metrics/report 经小型适配走统一执行器 | `eda/metrics/core.py` | 既有 `test_fixture_metrics.py` / `test_report_cli.py` | ✅ |
+| SQL 注入 / 绕过对抗 | validator + authorizer + 绑定参数 | `test_sql_validator.py`、`test_sql_executor.py`、`test_sql_compiler.py` | ✅ |
+
 ### 尚未实现（按阶段）
 
 | 需求 | 阶段 | 代码 | 测试 | 状态 |
 |---|---|---|---|---|
-| AnalysisPlan schema 与校验 | 2 | `eda/plan/`（待建） | — | ⬜ |
-| 确定性 AnalysisPlan → SQL 编译器 | 2 | `eda/sql/compiler.py`（待建） | — | ⬜ |
-| SQLGlot AST 安全校验 + 表白名单 | 2 | `eda/sql/validator.py`（待建） | — | ⬜ |
-| 统一只读安全执行器（行数/超时上限） | 2 | `eda/sql/executor.py`（待建） | — | ⬜ |
-| SQL 注入 / 绕过 对抗测试 | 2 | — | `tests/test_sql_executor_adversarial.py`（待建） | ⬜ |
 | DeepSeek 客户端（配置驱动） | 3 | `eda/llm/client.py`（待建） | — | ⬜ |
 | LangGraph 单轮指标查询 | 3 | `eda/graph/`（待建） | — | ⬜ |
 | 口径澄清（歧义时先问） | 3 | `eda/graph/clarify.py`（待建） | — | ⬜ |
@@ -96,7 +111,7 @@
 | **实际的 Python** | **3.12.6**（`py -3.12`，项目内 `.venv`）。本机只有 3.12 与 Anaconda 3.10.9，**没有 3.11**；未安装新解释器 |
 | SQLite | 3.45.3（随 CPython 3.12.6），满足 STRICT 表所需的 >= 3.37 |
 | 依赖检查 | `python -m pip check` → `No broken requirements found.`（exit 0） |
-| Git | 分支 `feat/semantic-foundation`，阶段 1 已提交（commit `3be0f29`，39 文件）。阶段 1.1 的改动**未提交**，按约束未执行 commit / push / merge / tag |
+| Git | 当前实现分支 `feat/secure-query-executor`（基于已含阶段 1.1 的 `main`）。按约束**未**执行 commit / push / merge / tag |
 | 现有数据库 | `data/business.db`、`data/fixture.db` 保持原样，阶段 1.1 未删除、未覆盖、未重新生成；测试全部使用 pytest 临时目录 |
 
 ### 依赖文件的用途（已核对文件实际格式，非凭文件名推断）
@@ -240,8 +255,8 @@ README.md / docs/architecture.md / docs/metrics.md / docs/progress.md
 
 ### 阶段 1.1 未实现 / 未验证
 
-- **通用 AnalysisPlan → SQL 编译器未实现**（按要求留给阶段二）。当前只有
-  `build_core_metrics_sql` / `build_breakdown_sql` 两个固定形状的 SQL 生成函数；
+- 通用 AnalysisPlan → SQL 编译器已在阶段 2 落地；阶段 1.1 当时只有
+  `build_core_metrics_sql` / `build_breakdown_sql` 两个固定形状的 SQL 生成函数，现仍保留给报表适配；
 - `compare`、`time_series`、`contribution` 三个分析操作在配置里声明为「业务支持」，
   但代码**未实现**，请求时会抛 `UnsupportedOperationError`；
 - 开发集与保留集**尚未生成**，`evaluation/README.md` 只定义了规范；
@@ -249,6 +264,79 @@ README.md / docs/architecture.md / docs/metrics.md / docs/progress.md
 - `semantic/*.yaml` 位于仓库根目录，**不会被打进 wheel**；当前只支持从源码目录运行
   （`pytest` 用 `pythonpath = ["."]`）。打包方案留给阶段六；
 - 语义层只在 Windows / SQLite 3.45.3 / CPython 3.12.6 上验证过。
+
+---
+
+## 阶段 2 交付内容
+
+闭环：`AnalysisPlan JSON` → Pydantic/语义校验 → 确定性编译 → SQLGlot AST 校验 →
+SQLite authorizer 只读执行 → 结构化结果。三个边界分开，没有混成一个大类：
+
+| 边界 | 模块 | 只回答什么 |
+|---|---|---|
+| 业务请求是否合法 | `eda/plan/models.py` | 指标/维度/操作/字段组合是否被语义层批准 |
+| SQL 结构与对象访问是否合法 | `eda/sql/validator.py` | 单条 SELECT、批准的表/列/函数、禁止写操作与绕过 |
+| 数据库执行层最后防护 | `eda/sql/authorizer.py` | 默认拒绝；只放行 SELECT / 批准 READ / 批准函数 |
+
+`eda/sql/executor.py` 只制定执行策略，连接必须来自 `eda.db.connect_readonly`。
+`sqlite3.connect` 仍只出现在 `eda/db.py`。排名就是 `breakdown + order_by + top_n`。
+现有 `compute_core_metrics` / `compute_breakdown` / report CLI 经函数内懒导入适配到
+`execute_on_connection`，公开签名与数值不变。
+
+资源限制是进程内尽力而为（`set_progress_handler` + 行数/字节预算），不是 OS 沙箱，
+也不是 SQLite `timeout`（那只是锁等待）。
+
+### 新增文件
+
+```
+eda/plan/{__init__,models}.py
+eda/sql/{__init__,catalog,compiler,validator,authorizer,executor}.py
+eda/query/{__init__,errors,models,service,cli}.py
+examples/plans/fixture_gmv_total.json
+examples/plans/fixture_gmv_by_category.json
+tests/test_analysis_plan.py
+tests/test_sql_compiler.py
+tests/test_sql_validator.py
+tests/test_sql_executor.py
+tests/test_query_service.py
+tests/test_query_cli.py
+```
+
+### 修改文件
+
+```
+eda/db.py                 # 正确编码的 mode=ro URI；分析查询改走执行器
+eda/config.py / .env.example  # SQL 长度 / 结果字节 / 单值长度预算
+eda/metrics/core.py       # 小型适配：函数内调用 execute_on_connection
+pyproject.toml            # packages 增加 eda.plan / eda.sql / eda.query
+README.md / docs/architecture.md / docs/progress.md
+```
+
+### 实际执行结果
+
+```
+.venv\Scripts\python.exe -m pip check
+-> No broken requirements found.（exit 0）
+
+.venv\Scripts\python.exe -m pytest -q
+-> 311 passed（含审查修补后的定向测试）
+
+.venv\Scripts\python.exe -m eda.query.cli --plan examples\plans\fixture_gmv_total.json --db data\fixture.db
+-> metric_value = 455200（与手工推导一致）
+
+.venv\Scripts\python.exe -m eda.query.cli --plan examples\plans\fixture_gmv_by_category.json --db data\fixture.db
+-> 手机数码 219200 / 家用电器 125000 / 食品生鲜 60400 / 服饰鞋包 50600
+```
+
+阶段 1 + 1.1 的 226 项全部保留通过。阶段 2 首次闭环验收为 297 passed；审查修补后为
+311 passed。fixture、期望值文件、`data/business.db` 与 `data/fixture.db` 均未改写。
+
+本阶段未实现：LLM、LangGraph、图表、期间对比、贡献拆解。按约束未 commit / push。
+
+阶段 2 审查修补（同日）：连接失败转为结构化 `db_error`；SQLite 绑定/中断/长度错误分别归
+`invalid_params` / `timeout` / `resource_limit`；authorizer 只允许 `main`；标识符
+`casefold`；第一版只接受 `JOIN ... ON`；`SQLITE_LIMIT_LENGTH` 按字节配置为
+`sql_max_value_bytes`。未覆盖边界见当次交付说明。
 
 ---
 
