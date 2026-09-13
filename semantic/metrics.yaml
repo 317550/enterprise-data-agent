@@ -1,0 +1,176 @@
+# ---------------------------------------------------------------------------
+# 语义层：指标定义（业务定义的权威来源）
+#
+# 这份文件是随代码受控维护的可信资产：
+#   * 只能由开发者通过代码评审修改，不接收用户上传的配置；
+#   * 业务定义（口径、过滤、允许维度、零分母策略）以本文件为准；
+#   * Python 只实现一组**有限且封闭**的计算操作（见 eda/metrics/operations.py），
+#     本文件不含任何可执行表达式，加载时使用 yaml.safe_load，不使用 eval / exec。
+#
+# 字段含义见 eda/semantic/models.py 的 MetricSpec。
+#
+# 写作约定：中文长文本一律写成 ">-" 后的**单行**，因为 YAML 折叠标量会把换行
+# 替换成空格，在中文里会留下多余空格。tests/test_semantic_config.py 会检查这一点。
+#
+# 修改本文件后必须同步 docs/metrics.md，并让 tests/test_semantic_config.py 与
+# tests/test_semantic_consistency.py 全绿。
+# ---------------------------------------------------------------------------
+schema_version: "1.0.0"
+
+notes_zh: >-
+  supported_operations 描述的是「该指标在业务上支持哪些分析操作」；当前**已实现**的操作由代码常量 eda.metrics.operations.IMPLEMENTED_ANALYSIS_OPERATIONS 声明，两者由测试校验（已实现必须是受支持的子集）。多步对比与贡献拆解的计划编译留到阶段二与阶段四。
+
+metrics:
+  # -------------------------------------------------------------------------
+  - id: effective_order_gmv_cents
+    # 阶段 1 曾用 revenue_cents 作为标识符；保留为别名以维持回归稳定，新代码一律用 canonical id。
+    legacy_ids: ["revenue_cents"]
+    name_zh: "有效订单成交额（简化口径）"
+    synonyms: ["有效订单成交额", "成交额", "销售额", "营业额", "GMV", "交易额"]
+    unit: cent
+    unit_zh: "分"
+    base_view: v_revenue_lines
+    grain: order_line
+    aggregation:
+      operation: sum
+      input_fields: ["line_amount_cents"]
+    additive: true
+    supported_operations: ["total", "breakdown", "time_series", "compare", "contribution"]
+    status_include: ["paid", "completed"]
+    status_exclude: ["pending", "cancelled", "refunded"]
+    filter_policy_zh: >-
+      仅纳入 status 为 paid 或 completed 的订单的全部明细行；pending / cancelled / refunded 三种状态的订单整单排除。金额取明细行的 quantity * unit_price_cents（成交时单价），不使用 products.list_price_cents（商品目录价）。
+    date_field: order_date
+    date_range_inclusive: both
+    allowed_dimensions: ["month", "date", "region", "category", "channel", "product"]
+    zero_denominator_policy:
+      strategy: not_applicable
+    definition_zh: >-
+      有效订单（paid / completed）的订单明细金额之和，单位为整数分。
+    caveats_zh:
+      - "不处理部分退款：项目中没有退款金额表，退款订单是整单排除，不做净额冲销。"
+      - "这不是财务净收入，也不等同于标准会计口径的 gross revenue，只能称为「有效订单成交额（简化口径）」。"
+      - "使用成交单价 unit_price_cents，不使用商品目录价 list_price_cents。"
+      - "日期区间按 order_date 左右端点都包含（闭区间）。"
+      - "按类别拆分时金额可加（各类别金额之和等于总额），因为金额按明细行归属。"
+
+  # -------------------------------------------------------------------------
+  - id: valid_order_count
+    legacy_ids: []
+    name_zh: "有效订单数"
+    synonyms: ["有效订单数", "有效订单量", "订单数", "订单量", "成交订单数"]
+    unit: order
+    unit_zh: "单"
+    base_view: v_revenue_lines
+    grain: order
+    aggregation:
+      operation: count_distinct
+      input_fields: ["order_id"]
+    additive: false
+    supported_operations: ["total", "breakdown", "time_series", "compare"]
+    status_include: ["paid", "completed"]
+    status_exclude: ["pending", "cancelled", "refunded"]
+    filter_policy_zh: >-
+      状态为 paid 或 completed、且至少包含一条明细行的订单，按 order_id 去重计数。
+    date_field: order_date
+    date_range_inclusive: both
+    allowed_dimensions: ["month", "date", "region", "category", "channel", "product"]
+    zero_denominator_policy:
+      strategy: not_applicable
+    definition_zh: >-
+      有效订单的去重订单数（COUNT DISTINCT order_id）。
+    caveats_zh:
+      - "必须按 order_id 去重；在明细粒度上用 COUNT(*) 会把多行订单重复计数。"
+      - "按类别或商品拆分时不可加：一张订单可横跨多个类别，各类别的订单数相加会大于总订单数，每个类别统计的是「包含该类别商品的订单数」。"
+      - "按月份 / 日期 / 地区 / 渠道拆分时是互斥划分，可加。"
+      - "没有任何明细行的订单不计入（本项目的数据生成保证每单至少一行明细）。"
+
+  # -------------------------------------------------------------------------
+  - id: aov_cents
+    legacy_ids: []
+    name_zh: "客单价"
+    synonyms: ["客单价", "平均订单金额", "单均价", "AOV"]
+    unit: cent_per_order
+    unit_zh: "分/单"
+    base_view: v_revenue_lines
+    grain: derived
+    aggregation:
+      operation: ratio
+      numerator_metric: effective_order_gmv_cents
+      denominator_metric: valid_order_count
+    additive: false
+    supported_operations: ["total", "breakdown", "time_series", "compare"]
+    status_include: ["paid", "completed"]
+    status_exclude: ["pending", "cancelled", "refunded"]
+    filter_policy_zh: >-
+      分子与分母使用同一批有效订单明细；施加任何筛选时分子与分母同时被筛选。
+    date_field: order_date
+    date_range_inclusive: both
+    allowed_dimensions: ["month", "date", "region", "category", "channel", "product"]
+    zero_denominator_policy:
+      strategy: return_null_with_note
+      note_zh: >-
+        有效订单数为 0，客单价无定义（返回空值而非 0）。请确认时间范围、地区或类别筛选是否过窄，或该区间确实没有 paid/completed 订单。
+    definition_zh: >-
+      有效订单成交额（简化口径） ÷ 有效订单数。
+    caveats_zh:
+      - "分母为 0 时返回空值（None / SQL NULL）并附带说明，绝不返回 0。"
+      - "除法由两个精确整数在 Python 中完成，避免 SQL 里意外发生整除；计算过程不做四舍五入，仅展示时格式化为两位小数的元。"
+      - "加了类别筛选时，分子只包含该类别商品的金额，分母是「包含该类别商品的订单数」，此时含义是「该类别对订单的平均贡献额」，不是该类别商品的平均单价。"
+      - "不可加：不能把各维度的客单价相加或简单平均得到总体客单价。"
+
+  # -------------------------------------------------------------------------
+  - id: item_quantity
+    legacy_ids: []
+    name_zh: "有效销量"
+    synonyms: ["有效销量", "销量", "件数", "商品数量"]
+    unit: piece
+    unit_zh: "件"
+    base_view: v_revenue_lines
+    grain: order_line
+    aggregation:
+      operation: sum
+      input_fields: ["quantity"]
+    additive: true
+    supported_operations: ["total", "breakdown", "time_series", "compare", "contribution"]
+    status_include: ["paid", "completed"]
+    status_exclude: ["pending", "cancelled", "refunded"]
+    filter_policy_zh: >-
+      有效订单明细行的 quantity 之和。
+    date_field: order_date
+    date_range_inclusive: both
+    allowed_dimensions: ["month", "date", "region", "category", "channel", "product"]
+    zero_denominator_policy:
+      strategy: not_applicable
+    definition_zh: >-
+      有效订单的明细数量之和。
+    caveats_zh:
+      - "不同类别的商品数量单位不可比（1 台空调与 1 盒牛奶都记 1 件），跨类别相加只能当作粗略规模指标。"
+
+  # -------------------------------------------------------------------------
+  - id: distinct_customers
+    legacy_ids: []
+    name_zh: "下单客户数"
+    synonyms: ["下单客户数", "客户数", "购买人数", "成交客户数"]
+    unit: customer
+    unit_zh: "人"
+    base_view: v_revenue_lines
+    grain: customer
+    aggregation:
+      operation: count_distinct
+      input_fields: ["customer_id"]
+    additive: false
+    supported_operations: ["total", "breakdown", "time_series", "compare"]
+    status_include: ["paid", "completed"]
+    status_exclude: ["pending", "cancelled", "refunded"]
+    filter_policy_zh: >-
+      有效订单所涉及的客户，按 customer_id 去重计数。
+    date_field: order_date
+    date_range_inclusive: both
+    allowed_dimensions: ["month", "date", "region", "category", "channel", "product"]
+    zero_denominator_policy:
+      strategy: not_applicable
+    definition_zh: >-
+      有效订单涉及的去重客户数。
+    caveats_zh:
+      - "去重指标在任何维度上都不可加：同一客户可能在多个月份、多个地区、多个类别下单。"

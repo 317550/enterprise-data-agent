@@ -12,6 +12,9 @@ dependencies = [
     "pydantic>=2.11,<3",
     "pydantic-settings>=2.8,<3",
     "python-dotenv>=1.0,<2",
+    # Reads the versioned semantic layer in semantic/*.yaml. Previously pulled in
+    # only as a transitive dependency; declared directly since stage 1.1 imports it.
+    "PyYAML>=6.0,<7",
     "sqlglot>=27,<31",
     "pandas>=2.2,<4",
     "plotly>=6,<8",
@@ -29,10 +32,15 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["eda", "eda.data", "eda.domain", "eda.metrics"]
+packages = ["eda", "eda.data", "eda.domain", "eda.metrics", "eda.semantic"]
 
 [tool.setuptools.package-data]
 "eda.data" = ["schema.sql", "fixtures/*.csv"]
+
+# NOTE: semantic/*.yaml lives at the repo root, not inside the package, so it is
+# NOT part of a built wheel. The project is run from a source checkout (pytest
+# uses pythonpath = ["."]), which is the only supported mode today. Packaging it
+# properly is a stage 6 release-check item, tracked in docs/progress.md.
 
 [tool.pytest.ini_options]
 minversion = "8.0"
