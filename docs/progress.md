@@ -2,6 +2,40 @@
 
 分阶段实施，每阶段完成后停下来交付、复核，再进入下一阶段。
 
+2026-09-14 阶段 4A.1 最终审查：保留现有全部未提交修改，实际读取包含未跟踪文件的
+10 个 conversation 模块、5 个定向测试文件及相关文档/配置。五节点、条件边、共享
+两次调用预算、一次查询、瞬态状态隔离、显式新话题、真实 TurnDecision 适配和锁边界
+均经审查。仅修复共享 HTTPS 传输的 URL/连接生命周期异常脱敏缺口，增加 5 个已复现
+失败的回归用例，并加强既有默认 CLI 断网断言；未重写图或扩大业务能力。
+
+按指定顺序验证：初始定向 **98 passed in 47.98s**；修复对应 mock 与原单轮测试
+**134 passed in 6.25s**；最终定向 **103 passed in 46.48s**；随后完整回归一次
+**601 passed in 62.41s**（原 596 项保留，新增 5 项异常边界回归）。pip check 与
+git diff --check 均通过；新文件也检查尾随空白。详细节点路径、字段白名单、手工命令、
+资产哈希与完整修改清单见[阶段 4A 说明](stage4a-conversation.md)。
+
+LangGraph / SQLite saver / core 实装版本 1.2.11 / 3.1.1 / 4.2.0 与声明和锁文件一致；
+requirements 的既有 pins 已满足 pyproject 收紧后的下限，没有新的依赖版本需要改写。
+business.db 与 fixture.db 的 SHA256、UTC mtime 均未变化，fixture、标准答案、
+语义配置和阶段二代码无 diff。Git 中无环境文件、真实凭据或运行时数据库/锁文件。
+保持 `feat/conversation-state`，未 commit/push/merge/tag/切换分支；真实模型调用为零，
+未进入阶段 4B。至此停止。
+
+2026-09-14 阶段 4A 更新：在 `feat/conversation-state` 的未提交现场继续，
+原有 conversation 协议、合并代码与 13 项测试保留并增量完善。已完成严格协议、
+条件继承/替换/清除、最小 StateGraph、独立 SQLite checkpoint、thread 隔离、
+澄清续接、程序重启恢复、新话题重置、失败不提升候选，以及同一 thread 忙时拒绝。
+请求、预算、原始模型响应与查询结果均放在 Runtime.context，只有有界业务状态持久化。
+新增离线多轮 CLI；原单轮接口兼容。详见[阶段 4A 说明](stage4a-conversation.md)。
+
+定向测试 58 passed；完整回归 **554 passed in 56.59s**（exit 0）：
+原 488 项保留，新增 58 项多轮测试及 8 项随模块展开的代码约束检查。
+使用 `.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider`；系统 Python
+的 pytest 7.1.2 不满足项目要求，Windows 测试临时目录需在已授权的沙箱外运行。
+pip check / git diff --check 通过。business.db 与 fixture.db SHA256 未变。
+未改 fixture、标准答案、语义配置或阶段二安全实现；未调用真实模型；
+未 commit / push / merge / tag 或切换分支。阶段 4B 未开始。
+
 2026-09-13 阶段三更新：`eda/agent/` 已实现单轮自然语言规划和 Fake 离线测试。
 复用阶段二全链路，不允许模型生成或修复 SQL。默认离线，真实 HTTPS 适配器
 只在显式 `--provider real` 时选择；真实烟雾测试仍待用户手工执行。
@@ -22,7 +56,7 @@ business.db 与 fixture.db 的 SHA256 / mtime 均未变化。旧记录中“空 
 | 1 | 数据基础、语义定义、人工 fixture 与评测划分规则 | ✅ 已完成（阶段 1 + 阶段 1.1，2026-09-13） |
 | 2 | 结构化 AnalysisPlan 校验、确定性 SQL 编译器、统一只读安全执行器 | ✅ 已完成（2026-09-13） |
 | 3 | 自然语言 → AnalysisPlan 单轮规划、澄清/拒绝与一次计划修复 | ✅ 离线实现完成；真实烟雾验证待执行 |
-| 4 | 有限多步对比与贡献拆解、多轮追问与持久化 | ⬜ 未开始 |
+| 4 | 多轮追问与持久化；有限多步对比与贡献拆解 | ✅ 4A 离线完成（2026-09-14）；⬜ 4B 未开始 |
 | 5 | 结论证据校验、受控图表、Streamlit 界面与运行记录 | ⬜ 未开始 |
 | 6 | 对照实验、独立保留集评测、离线 CI 与发布检查 | ⬜ 未开始 |
 
@@ -91,12 +125,14 @@ business.db 与 fixture.db 的 SHA256 / mtime 均未变化。旧记录中“空 
 | 需求 | 阶段 | 代码 | 测试 | 状态 |
 |---|---|---|---|---|
 | 单轮规划协议与模型接口 | 3 | `eda/agent/models.py`、`planner.py`、`fake.py`、`real.py` | `test_agent_planning.py` | ✅ 离线验证；真实适配器待烟雾验证 |
-| LangGraph | 不在本阶段 | — | — | 不实现 |
+| 最小 LangGraph / Runtime.context | 4A | `eda/conversation/graph.py` | `test_conversation_graph.py` | ✅ 离线验证 |
 | 口径澄清（歧义时先问） | 3 | `eda/agent/service.py` | `test_agent_planning.py` | ✅ |
 | 一次计划修复与最多两次调用 | 3 | `eda/agent/service.py` | `test_agent_planning.py` | ✅ |
-| 有限多步对比（`compare` 操作） | 4 | `eda/plan/multistep.py`（待建） | — | ⬜ |
-| 贡献拆解（`contribution`，仅数值分解） | 4 | `eda/plan/multistep.py`（待建） | — | ⬜ |
-| checkpoint 持久化与会话隔离 | 4 | `eda/graph/checkpoint.py`（待建） | — | ⬜ |
+| 有限多步对比（`compare` 操作） | 4B | `eda/plan/multistep.py`（待建） | — | ⬜ |
+| 贡献拆解（`contribution`，仅数值分解） | 4B | `eda/plan/multistep.py`（待建） | — | ⬜ |
+| 严格多轮合并与显式清除 | 4A | `eda/conversation/models.py`、`merge.py` | `test_conversation_merge.py` | ✅ |
+| checkpoint 持久化、隔离、恢复与并发 | 4A | `eda/conversation/checkpoint.py`、`service.py` | `test_conversation_checkpoint.py`、`test_conversation_cli.py` | ✅ 本机跨进程验证 |
+| 多轮 CLI / 显式新话题 / 真实适配器 | 4A.1 | `eda/conversation/fake.py`、`real.py`、`cli.py` | `test_conversation_cli.py`、`test_conversation_real.py` | ✅ Fake/mock 验证；真实烟雾待执行 |
 | 结论证据校验 | 5 | `eda/audit/`（待建） | — | ⬜ |
 | 受控确定性图表 | 5 | `eda/viz/`（待建） | — | ⬜ |
 | Streamlit 界面与运行记录 | 5 | `app/streamlit_app.py`（待建） | — | ⬜ |
@@ -120,7 +156,7 @@ business.db 与 fixture.db 的 SHA256 / mtime 均未变化。旧记录中“空 
 | **实际的 Python** | **3.12.6**（`py -3.12`，项目内 `.venv`）。本机只有 3.12 与 Anaconda 3.10.9，**没有 3.11**；未安装新解释器 |
 | SQLite | 3.45.3（随 CPython 3.12.6），满足 STRICT 表所需的 >= 3.37 |
 | 依赖检查 | `python -m pip check` → `No broken requirements found.`（exit 0） |
-| Git | 当前实现分支 `feat/secure-query-executor`（基于已含阶段 1.1 的 `main`）。按约束**未**执行 commit / push / merge / tag |
+| Git | 当前实现分支 `feat/conversation-state`；全部阶段 4A/4A.1 修改未提交。按约束**未**执行 commit / push / merge / tag |
 | 现有数据库 | `data/business.db`、`data/fixture.db` 保持原样，阶段 1.1 未删除、未覆盖、未重新生成；测试全部使用 pytest 临时目录 |
 
 ### 依赖文件的用途（已核对文件实际格式，非凭文件名推断）
