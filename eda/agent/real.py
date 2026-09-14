@@ -24,13 +24,22 @@ class RealPlannerModel:
         self._temperature = settings.llm_temperature
 
     def plan(self, question: str, context: dict) -> object:
+        return self._request_json(question, context)
+
+    def _request_json(self, question: str, context: dict) -> object:
+        """Shared one-shot HTTPS transport; callers own their business protocol."""
         # Read only the process environment, never Settings' .env-backed key.
         key = os.environ.get("DEEPSEEK_API_KEY")
-        endpoint = urlsplit(self._base_url)
-        if not key or endpoint.scheme != "https" or not endpoint.hostname or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment:
-            raise ModelFailure("model_configuration_error")
-        conn = http.client.HTTPSConnection(endpoint.hostname, endpoint.port, timeout=self._timeout)
         try:
+            endpoint = urlsplit(self._base_url)
+            port = endpoint.port
+            if not key or endpoint.scheme != "https" or not endpoint.hostname or endpoint.username is not None or endpoint.password is not None or endpoint.query or endpoint.fragment:
+                raise ValueError("invalid endpoint or key")
+        except (ValueError, TypeError):
+            raise ModelFailure("model_configuration_error") from None
+        conn = None
+        try:
+            conn = http.client.HTTPSConnection(endpoint.hostname, port, timeout=self._timeout)
             body = json.dumps({
                 "model": self.model_name,
                 "messages": [
@@ -64,4 +73,8 @@ class RealPlannerModel:
         except Exception:
             raise ModelFailure("model_unavailable") from None
         finally:
-            conn.close()
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    raise ModelFailure("model_unavailable") from None

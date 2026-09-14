@@ -2,9 +2,10 @@
 
 本项目是一个**本地可复现、可测试的作品集项目**，不声称生产就绪。
 
-**当前项目定位（阶段三更新）**：基于受控业务语义层的单轮经营分析 Agent。
-阶段三采用接口驱动的规划服务，不引入 LangGraph 或第二次模型解释。当前实现以
-[阶段三协议](stage3-planning.md) 为准，模型不接触 SQL 或数据库。
+**当前项目定位（阶段 4A 更新）**：基于受控业务语义层的经营分析 Agent。
+原[阶段三单轮接口](stage3-planning.md) 保持兼容；新增
+[阶段 4A 严格多轮接口](stage4a-conversation.md)，使用最小 LangGraph 与独立
+SQLite checkpoint。模型不接触 SQL 或数据库，也不负责第二次结果解释。
 
 不是「把自然语言翻译成 SQL」，而是「把自然语言映射到受控的业务语义，再由确定性代码
 编译成 SQL」。这个区别决定了后面所有设计。
@@ -50,7 +51,8 @@
 | 5 | 结论证据校验、受控图表、Streamlit 界面与运行记录 |
 | 6 | 对照实验、独立保留集评测、离线 CI 与发布检查 |
 
-阶段 1、1.1、2 与阶段三离线实现已完成；真实模型验证待手工执行。逐项状态见
+阶段 1、1.1、2、3 与阶段 4A 离线实现已完成；阶段 4B 尚未开始。
+真实模型验证待手工执行。逐项状态见
 [`docs/progress.md`](progress.md) 的追踪表。
 
 ---
@@ -72,7 +74,14 @@
 模型只负责规划，不负责计算或解释结果，不具备 SQL 或数据库能力。
 执行错误是终止状态，绝不返回模型修复。每请求最多两次模型调用。
 完整接口、命令和测试范围见 [stage3-planning.md](stage3-planning.md)。
-多轮持久化与后续编排仍未实现，也没有提前建设其框架。
+阶段 4A 另设 `START → begin → plan → merge → execute → finalize → END` 图：
+只有 merge 首次验证失败可回到 plan 修复一次，其余终止分支进入 finalize，
+finalize 唯一出口为 END。协议合并后复用同一个
+`run_analysis_plan`。只有有界 Session 进入图状态；请求、预算、模型响应和
+查询结果放在 Runtime.context。独立 SqliteSaver 持久化业务状态，同一 thread
+通过本机 OS 锁拒绝并发；重启后处理新请求，不重放未完成轮次。
+多轮 RealConversationModel 复用阶段三 HTTPS 传输并校验 TurnDecision；
+CLI 默认 fake，显式 --provider real 才联网；--new-topic 由代码清空继承起点。
 
 ---
 
@@ -211,7 +220,7 @@ cursor 和回调，并恢复原 SQLite 长度限制。内部新建连接在成�
 
 | 数据库 | 写入者 | 模型可见性 |
 |---|---|---|
-| `data/business.db` | 只有 `python -m eda.data.build_db` | 只读查询，表结构对模型可见 |
+| `data/business.db` | 只有 `python -m eda.data.build_db` | 模型仅见批准的业务语义，不见物理表结构或数据行 |
 | `data/checkpoints.db` | 只有 LangGraph（阶段 4） | **完全不可见**，不在表白名单里，生成的 SQL 无法触达 |
 
 ### 5.4 SQL 可执行 ≠ 答案正确
@@ -233,8 +242,8 @@ cursor 和回调，并恢复原 SQLite 长度限制。内部新建连接在成�
 
 ### 5.5 密钥与费用
 
-API Key、Base URL、模型名全部来自 `eda/config.py`（pydantic-settings 读 `.env`）。
-Key 用 `SecretStr` 包装，打印 settings 或日志都只会看到掩码。
+Base URL、模型名等配置来自 `eda/config.py`（pydantic-settings 读 `.env`）。
+Settings 中的 Key 用 `SecretStr` 包装；真实适配器只使用进程环境变量中的 Key。
 `.env.example` 只含占位值，有测试断言这一点。
 
 阶段三所有自动化测试使用 Fake，不访问网络。真实适配器只在 CLI 显式选择
@@ -256,7 +265,7 @@ evaluation/
 
 eda/
   __init__.py
-  config.py                # Settings（.env）；key/base_url/model 都在这里
+  config.py                # Settings（.env）；真实适配器 Key 仅来自进程环境
   db.py                    # 唯一的 sqlite3 出入口：只读连接 + 执行原语
   semantic/
     models.py              # 语义层 Pydantic schema + 交叉引用校验
@@ -288,6 +297,8 @@ eda/
   query/
     service.py             # 计划闭环：parse → compile → execute → 结构化结果
     cli.py                 # 薄 CLI：读 JSON 计划
+  agent/                   # 原单轮接口与共享一次 HTTPS 传输
+  conversation/            # TurnDecision、五节点图、恢复/锁、Fake/real 与 CLI
 ```
 
 **定义、编译、执行三者分离**是这里的关键：YAML 负责定义，`operations.py` +
@@ -303,7 +314,8 @@ eda/
 |---|---|---|
 | 2（已完成） | `eda/plan/`、`eda/sql/`、`eda/query/` | AnalysisPlan schema 与校验、确定性 SQL 编译器、SQLGlot AST 校验、SQLite authorizer、行数/超时上限、对抗测试 |
 | 3（离线实现完成） | `eda/agent/` | PlannerDecision、Fake/真实规划适配器、严格日期和计划校验、最多两次模型调用；真实烟雾验证待执行 |
-| 4 | `eda/graph/checkpoint.py`、`eda/plan/multistep.py` | 有限多步对比与贡献拆解（数值分解，非因果）、checkpoint 持久化、`thread_id` 会话隔离 |
+| 4A / 4A.1（离线完成） | `eda/conversation/` | 五节点多轮协议、独立 checkpoint、thread 隔离、显式新话题；真实烟雾验证待执行 |
+| 4B（未开始） | `eda/plan/multistep.py`（待建） | 有限多步对比与贡献拆解（数值分解，非因果） |
 | 5 | `app/streamlit_app.py`、`eda/viz/`、`eda/audit/` | 结论证据校验、受控确定性图表、运行记录与追溯 |
 | 6 | `evaluation/dev/`、`evaluation/heldout/`、`evaluation/runs/` | 对照实验（语义层 vs 自由 Text-to-SQL 基线）、独立保留集评测、离线 CI、发布检查 |
 

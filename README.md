@@ -2,7 +2,7 @@
 
 基于**受控业务语义层**的**只读**经营数据分析 Agent：自然语言问题 →
 结构化分析计划 → 确定性 SQL 编译 → 安全校验与只读执行 → 结果与证据，
-当前支持单轮规划，多轮追问与会话恢复尚未实现。
+当前支持单轮规划，以及阶段 4A 的严格多轮追问与本地会话恢复。
 
 > **这是一个本地、可复现、可测试的作品集项目，不声称生产就绪。**
 > 数据是虚构的电商经营数据，不含任何真实个人信息。
@@ -12,11 +12,15 @@
 
 自由 Text-to-SQL 在本项目中**只作为评测基线**，不是默认执行路径。
 
-**当前进度：阶段 1、1.1、2 与阶段 3 离线实现已完成**。阶段三新增
+**当前进度：阶段 1、1.1、2、3 与阶段 4A 离线实现已完成**。阶段三新增
 PlannerDecision → AnalysisPlan 单轮规划；默认 Fake 模型，无联网，真实规划
 需显式 `--provider real`。模型不能生成 SQL、访问数据库或解释数值。
-未包含 LangGraph 与 Web 界面，真实模型烟雾验证待用户手工执行。
+阶段 4A 新增最小 LangGraph、独立 SQLite checkpoint、thread 隔离、澄清续接、
+程序重启恢复和并发拒绝策略；多轮 CLI 默认 Fake，支持显式 `--provider real`
+及确定性 `--new-topic`。Web 界面与阶段 4B 尚未实现，
+真实模型烟雾验证待用户手工执行。
 协议、时间规则、预算和命令见[阶段三说明](docs/stage3-planning.md)。
+多轮协议、恢复边界和 CLI 示例见[阶段 4A 说明](docs/stage4a-conversation.md)。
 完整分阶段状态与逐项追踪表见 [`docs/progress.md`](docs/progress.md)。
 
 ---
@@ -48,7 +52,7 @@ PlannerDecision → AnalysisPlan 单轮规划；默认 Fake 模型，无联网�
 | 解释器 | `.venv\Scripts\python.exe`，CPython 3.12.6 |
 | SQLite | 3.45.3（CPython 3.12.6 自带） |
 | `pip check` | `No broken requirements found.` |
-| `pytest -q` | **488 passed**（阶段三 Fake 离线验证后；原阶段二基线 374 项保留） |
+| `pytest -q -p no:cacheprovider` | **601 passed**（阶段 4A.1 最终审查后；保留原 596 项回归） |
 
 其他平台、其他 Python 版本（含计划里的 3.11）**均未验证**。
 
@@ -170,8 +174,8 @@ enterprise_data_agent/
     relationships.yaml
   evaluation/
     README.md              # 评测划分规范：fixture / 开发集 / 保留集与保留集纪律
-  eda/                     # 应用代码（当前阶段完全离线）
-    config.py              # Settings：API key / base_url / model / 路径，全部来自 .env
+  eda/                     # 应用代码（默认 Fake；显式 real 才联网）
+    config.py              # Settings：base_url / model / 路径；真实 Key 仅来自进程环境
     db.py                  # 唯一的 sqlite3 出入口；只读连接 mode=ro + query_only
     semantic/              # 语义层 schema 与加载器（safe_load + 版本校验）
     domain/                # 受控词表 + Pydantic 行模型
@@ -180,6 +184,8 @@ enterprise_data_agent/
     plan/                  # AnalysisPlan：业务请求是否合法
     sql/                   # 确定性编译、SQLGlot 校验、authorizer、执行策略
     query/                 # 计划闭环服务与薄 CLI
+    agent/                 # 原单轮规划接口与共享 HTTPS 传输
+    conversation/          # 严格多轮协议、五节点图、恢复/锁、Fake/real 与 CLI
   examples/plans/          # 手工可跑的 AnalysisPlan JSON
   tests/                   # pytest；不访问网络，不调用 LLM
     data/expected_fixture_metrics.json   # 人工推导的期望值（测试资产）

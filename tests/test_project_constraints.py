@@ -73,6 +73,12 @@ def test_stage1_package_does_not_import_llm_or_ui_libraries() -> None:
             elif isinstance(node, ast.ImportFrom) and node.module:
                 names = [node.module.split(".")[0]]
             for name in names:
+                # Stage 4A's orchestration/checkpoint modules use LangGraph;
+                # the existing data, plan and safe execution layers stay offline.
+                if name == "langgraph" and path.relative_to(PACKAGE_ROOT).as_posix() in {
+                    "conversation/graph.py", "conversation/checkpoint.py",
+                }:
+                    continue
                 if name in forbidden:
                     offenders.append(f"{path.relative_to(PROJECT_ROOT).as_posix()}: {name}")
     assert offenders == [], f"stage 1 code must stay offline: {offenders}"
