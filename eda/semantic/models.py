@@ -19,12 +19,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 #: The only schema version this code knows how to read. Bump together with the
 #: YAML files and with the migration note in docs/progress.md.
-SUPPORTED_SCHEMA_VERSION = "1.0.0"
+SUPPORTED_SCHEMA_VERSION = "1.1.0"
 
 #: Analysis operations that a metric can meaningfully support. Closed set.
 #: Which of these are *implemented today* is declared in
 #: eda.metrics.operations.IMPLEMENTED_ANALYSIS_OPERATIONS, not here.
-AnalysisOperation = Literal["total", "breakdown", "time_series", "compare", "contribution"]
+AnalysisOperation = Literal["total", "breakdown", "time_series", "compare", "mom", "contribution"]
 
 #: What may be done with a dimension. Closed set.
 DimensionOperation = Literal["group_by", "filter"]
@@ -139,6 +139,8 @@ class MetricSpec(_Spec):
     grain: Grain
     aggregation: Aggregation
     additive: bool
+    additive_dimensions: tuple[str, ...]
+    contribution_dimensions: tuple[str, ...]
     supported_operations: tuple[AnalysisOperation, ...] = Field(min_length=1)
     status_include: tuple[str, ...]
     status_exclude: tuple[str, ...]
@@ -176,6 +178,19 @@ class MetricSpec(_Spec):
     def _duplicate_dimensions(self) -> MetricSpec:
         if len(set(self.allowed_dimensions)) != len(self.allowed_dimensions):
             raise ValueError(f"metric {self.id!r} lists a dimension twice")
+        return self
+
+    @model_validator(mode="after")
+    def _contribution_rules(self) -> MetricSpec:
+        for dimensions in (self.additive_dimensions, self.contribution_dimensions):
+            if len(set(dimensions)) != len(dimensions):
+                raise ValueError("duplicate additivity/contribution dimension")
+            if not set(dimensions) <= set(self.allowed_dimensions):
+                raise ValueError("additivity/contribution dimension must be allowed")
+        if not set(self.contribution_dimensions) <= set(self.additive_dimensions):
+            raise ValueError("contribution requires additive dimensions")
+        if bool(self.contribution_dimensions) != ("contribution" in self.supported_operations):
+            raise ValueError("contribution capability and dimensions must agree")
         return self
 
     @property
@@ -436,6 +451,13 @@ class SemanticModel(BaseModel):
     def dimensions_supporting(self, operation: str) -> tuple[DimensionSpec, ...]:
         return tuple(d for d in self.dimensions if d.supports(operation))
 
+    def is_additive_over(self, metric_id: str, dimension_id: str) -> bool:
+        """One independent partition; never combine multiple contribution views."""
+        metric = self.metric(metric_id)
+        dimension = self.dimension(dimension_id)
+        return (dimension.id in metric.additive_dimensions
+                and metric.id not in dimension.non_additive_metrics)
+
     # --- cross-file validation ---
 
     @model_validator(mode="after")
@@ -545,6 +567,12 @@ class SemanticModel(BaseModel):
                 raise ValueError(
                     f"metric {metric.id!r} allows unknown dimensions {sorted(unknown)}"
                 )
+            for dimension_id in metric.additive_dimensions:
+                if metric.id in self.dimension(dimension_id).non_additive_metrics:
+                    raise ValueError("conflicting dimension additivity declarations")
+            for dimension_id in metric.contribution_dimensions:
+                if not self.dimension(dimension_id).supports("group_by"):
+                    raise ValueError("contribution dimension must support group_by")
 
         for dimension in self.dimensions:
             if dimension.source_view not in view_columns:

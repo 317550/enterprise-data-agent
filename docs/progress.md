@@ -416,3 +416,9 @@ README.md / docs/architecture.md / docs/progress.md
 `test_expected_answers_are_not_baked_into_runtime_code` 最初用纯文本匹配源码，
 把文档字符串里的说明文字误判成违规。修法是把检查改成在**语法树**上做（更精确、更严格），
 而不是放宽断言。
+
+## 2026-09-14 阶段 4B-1
+
+开始前确认 feat/comparative-analysis、干净工作区、PR #4 合并提交 01b65aa，离线基线 601 passed in 30.36s。新增严格比较计划、完整日历期间、配置驱动可加性和纯 Decimal 比较/贡献计算。三份语义 YAML 与 SUPPORTED_SCHEMA_VERSION 同步升级 1.0.0 → 1.1.0，原 4A checkpoint 明确拒绝，不静默迁移。未修改阶段二执行器、会话图或 CLI；未接入自然语言规划、数据库查询或真实模型。详见 [阶段 4B-1](stage4b-1-comparative.md)。
+
+最终定向 233 passed in 6.62s；完整回归 711 passed in 30.34s（保留原 601 项）。git diff --check 通过。停止于 4B-1，等待 4B-2；未提交或推送。

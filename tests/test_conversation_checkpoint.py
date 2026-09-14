@@ -104,6 +104,22 @@ def test_reference_is_stable_and_version_is_checked(fixture_db, tmp_path):
         svc.run("a", "继续")
 
 
+def test_stage4a_semantic_checkpoint_is_rejected_without_migration(fixture_db, tmp_path):
+    svc = service(fixture_db, tmp_path)
+    raw = Session(reference_date="2024-06-30").model_dump(exclude_none=True)
+    assert raw["semantic_version"] == "1.1.0"
+    raw["semantic_version"] = "1.0.0"
+    config = {"configurable": {"thread_id": "old-4a"}}
+    with open_checkpointer(svc.checkpoint_db_path) as saver:
+        build_graph(saver).update_state(config, {"session": raw})
+    before = svc.checkpoint_db_path.read_bytes()
+    with pytest.raises(ConversationError, match="incompatible_checkpoint"):
+        svc.inspect("old-4a")
+    with pytest.raises(ConversationError, match="incompatible_checkpoint"):
+        svc.run("old-4a", "继续")
+    assert svc.checkpoint_db_path.read_bytes() == before
+
+
 def test_concurrent_service_instances_hold_lock_for_entire_turn(fixture_db, tmp_path):
     entered, release = threading.Event(), threading.Event()
 

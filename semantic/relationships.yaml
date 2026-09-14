@@ -15,7 +15,7 @@
 #
 # 中文长文本写成 ">-" 后的单行，避免 YAML 折叠标量插入多余空格。
 # ---------------------------------------------------------------------------
-schema_version: "1.0.0"
+schema_version: "1.1.0"
 
 notes_zh: >-
   粒度阶梯：orders（1 订单 1 行） -> order_items（1 订单 N 行） -> products / customers（按主键 1:1）。金额只在明细行粒度求和；订单数一律 COUNT(DISTINCT order_id)。
