@@ -1,6 +1,6 @@
 """Bounded sequential execution; no SQL, model, graph, or persistence layer."""
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from decimal import Decimal
 import math
 import time
@@ -34,8 +34,9 @@ class ComparativeExecutionLimits(StrictComparativeModel):
 
 
 class _Stop(Exception):
-    def __init__(self, code):
+    def __init__(self, code, source=None):
         self.code = code
+        self.source = source
 
 
 @dataclass
@@ -124,6 +125,106 @@ def _check(result, step, seen_ids):
     return result
 
 
+@dataclass
+class ComparativeRun:
+    """Transient step cursor shared by the public runner and the conversation graph."""
+
+    execution_plan: object
+    bounds: ComparativeExecutionLimits
+    budget: ComparativeExecutionBudget
+    index: int = 0
+    pending_result: object = None
+    evidence: list = field(default_factory=list)
+    results: dict = field(default_factory=dict)
+
+    @property
+    def has_next(self):
+        return self.index < len(self.execution_plan.steps)
+
+
+def prepare_analysis(plan, limits=None, *, deadline=None, clock=time.monotonic):
+    started = clock() if deadline is None else None
+    try:
+        execution_plan = compile_comparative_plan(plan)
+    except Exception:
+        raise _Stop("invalid_plan") from None
+    try:
+        bounds = ComparativeExecutionLimits.model_validate(
+            limits if limits is not None else ComparativeExecutionLimits())
+    except Exception:
+        raise _Stop("invalid_limits", execution_plan.plan) from None
+    budget = ComparativeExecutionBudget(
+        min(bounds.max_queries, len(execution_plan.steps)),
+        started + bounds.timeout_seconds if deadline is None else deadline,
+    )
+    return ComparativeRun(execution_plan, bounds, budget)
+
+
+def execute_step(run, db_path, runner=run_analysis_plan, *, clock=time.monotonic):
+    if not run.has_next or run.pending_result is not None:
+        raise _Stop("budget_exhausted")
+    remaining = run.budget.remaining(clock)
+    per_query = ExecutionLimits.model_validate(dict(
+        **run.bounds.query_limits.model_dump(exclude={"timeout_seconds"}),
+        timeout_seconds=min(run.bounds.query_limits.timeout_seconds, remaining),
+    ))
+    run.budget.attempt(clock)
+    try:
+        result = runner(run.execution_plan.steps[run.index].analysis_plan, db_path, limits=per_query)
+    except Exception as exc:
+        run.budget.remaining(clock)
+        raise _Stop("timeout" if isinstance(exc, QueryError) and exc.code == "timeout"
+                    else "execution_error") from None
+    run.budget.remaining(clock)
+    run.pending_result = result
+
+
+def check_step(run, *, clock=time.monotonic):
+    run.budget.remaining(clock)
+    step = run.execution_plan.steps[run.index]
+    result = _check(run.pending_result, step, {item.query_id for item in run.evidence})
+    run.results[step.role] = result
+    run.evidence.append(ComparativeEvidence(
+        **step.model_dump(), query_id=result.query_id, row_count=len(result.rows),
+    ))
+    run.pending_result = None
+    run.index += 1
+
+
+def calculate(run, *, clock=time.monotonic):
+    run.budget.remaining(clock)
+    if run.has_next or run.pending_result is not None:
+        raise _Stop("incomplete_result")
+    comparison, contribution = _calculate(run.execution_plan.plan, run.results)
+    run.budget.remaining(clock)
+    return comparison, contribution
+
+
+def _calculate(source, results):
+    contribution = None
+    baseline = _number(results["baseline_total"].rows[0].metric_value)
+    current = _number(results["current_total"].rows[0].metric_value)
+    calculated = calculate_comparison(current, baseline)
+    if source.operation == "contribution":
+        maps = {role: {row.dimension_value: _number(row.metric_value) for row in results[role].rows}
+                for role in ("baseline_breakdown", "current_breakdown")}
+        calculated_contribution = calculate_contribution(
+            source, maps["current_breakdown"], maps["baseline_breakdown"],
+            current_total=current, baseline_total=baseline,
+        )
+        if calculated_contribution.status != "success":
+            raise _Stop("reconciliation_failed")
+        contribution = Contribution(
+            dimension_id=calculated_contribution.dimension_id,
+            reconciled_change=calculated_contribution.reconciled_change,
+            rows=tuple(ContributionDetail(**asdict(row)) for row in calculated_contribution.rows),
+            hidden_dimension_count=calculated_contribution.hidden_dimension_count,
+            hidden_net_change=calculated_contribution.hidden_net_change,
+        )
+    comparison = Comparison(**asdict(calculated))
+    return comparison, contribution
+
+
 def run_comparative_analysis(
     plan, db_path, limits=None, runner=run_analysis_plan, *, clock=time.monotonic,
 ) -> ComparativeAnalysisResult:
@@ -133,78 +234,33 @@ def run_comparative_analysis(
     and retain the validated dispatched plan as evidence of bindings requested.
     Deadlines are cooperative: a misbehaving injected runner cannot be killed.
     """
-    started = clock()
     analysis_id = uuid.uuid4().hex
     source = None
-    budget = None
-    evidence = []
-    results = {}
+    run = None
     comparison = contribution = None
     error = None
     try:
-        try:
-            execution_plan = compile_comparative_plan(plan)
-            source = execution_plan.plan
-        except Exception:
-            raise _Stop("invalid_plan") from None
-        try:
-            bounds = ComparativeExecutionLimits.model_validate(
-                limits if limits is not None else ComparativeExecutionLimits()
-            )
-        except Exception:
-            raise _Stop("invalid_limits") from None
-        budget = ComparativeExecutionBudget(
-            min(bounds.max_queries, len(execution_plan.steps)), started + bounds.timeout_seconds,
-        )
-        for step in execution_plan.steps:
-            remaining = budget.remaining(clock)
-            per_query = ExecutionLimits.model_validate(dict(
-                **bounds.query_limits.model_dump(exclude={"timeout_seconds"}),
-                timeout_seconds=min(bounds.query_limits.timeout_seconds, remaining),
-            ))
-            budget.attempt(clock)
-            try:
-                result = runner(step.analysis_plan, db_path, limits=per_query)
-            except Exception as exc:
-                budget.remaining(clock)
-                raise _Stop("timeout" if isinstance(exc, QueryError) and exc.code == "timeout"
-                            else "execution_error") from None
-            budget.remaining(clock)
-            result = _check(result, step, {item.query_id for item in evidence})
-            results[step.role] = result
-            evidence.append(ComparativeEvidence(
-                **step.model_dump(), query_id=result.query_id, row_count=len(result.rows),
-            ))
-        baseline = _number(results["baseline_total"].rows[0].metric_value)
-        current = _number(results["current_total"].rows[0].metric_value)
-        calculated = calculate_comparison(current, baseline)
-        if source.operation == "contribution":
-            maps = {role: {row.dimension_value: _number(row.metric_value) for row in results[role].rows}
-                    for role in ("baseline_breakdown", "current_breakdown")}
-            calculated_contribution = calculate_contribution(
-                source, maps["current_breakdown"], maps["baseline_breakdown"],
-                current_total=current, baseline_total=baseline,
-            )
-            if calculated_contribution.status != "success":
-                raise _Stop("reconciliation_failed")
-            contribution = Contribution(
-                dimension_id=calculated_contribution.dimension_id,
-                reconciled_change=calculated_contribution.reconciled_change,
-                rows=tuple(ContributionDetail(**asdict(row)) for row in calculated_contribution.rows),
-                hidden_dimension_count=calculated_contribution.hidden_dimension_count,
-                hidden_net_change=calculated_contribution.hidden_net_change,
-            )
-        comparison = Comparison(**asdict(calculated))
-        budget.remaining(clock)
+        run = prepare_analysis(plan, limits, clock=clock)
+        source = run.execution_plan.plan
+        while run.has_next:
+            execute_step(run, db_path, runner, clock=clock)
+            check_step(run, clock=clock)
+        comparison, contribution = calculate(run, clock=clock)
     except _Stop as exc:
         error = exc.code
+        source = source or exc.source
         comparison = contribution = None
     except (ValueError, ArithmeticError, TypeError, AttributeError):
         error = "invalid_result_shape"
         comparison = contribution = None
+    return render_result(run, comparison, contribution, error, source=source, analysis_id=analysis_id)
+
+
+def render_result(run, comparison=None, contribution=None, error=None, *, source=None, analysis_id=None):
+    source = run.execution_plan.plan if run else source
     definition = METRIC_REGISTRY[source.metric_id] if source else None
     return ComparativeAnalysisResult(
-        analysis_id=analysis_id, semantic_version=SEMANTIC.schema_version,
+        analysis_id=analysis_id or uuid.uuid4().hex, semantic_version=SEMANTIC.schema_version,
         metric_id=source.metric_id if source else None,
         metric_name_zh=definition.name_zh if definition else None,
         unit=definition.unit if definition else None,
@@ -212,7 +268,7 @@ def run_comparative_analysis(
         operation=source.operation if source else None,
         baseline_period=source.baseline_period if source else None,
         current_period=source.current_period if source else None,
-        query_count=budget.query_count if budget else 0, evidence=tuple(evidence),
+        query_count=run.budget.query_count if run else 0, evidence=tuple(run.evidence) if run else (),
         comparison=comparison, contribution=contribution, error_code=error,
         completeness=ComparativeCompleteness(
             is_complete_population=error is None,

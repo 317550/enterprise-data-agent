@@ -101,7 +101,10 @@ def test_actual_node_paths(outputs, question, fail_execution, path, status, fixt
     assert ctx.result.status == status
     assert ctx.model_call_count == path.count("plan") <= 2
     assert len(calls) == ctx.execution_count == path.count("execute") <= 1
-    assert set(graph.nodes) == {"__start__", "begin", "plan", "merge", "execute", "finalize"}
+    assert set(graph.nodes) == {"__start__", "begin", "plan", "merge", "execute", "finalize",
+                                "prepare_analysis", "execute_step", "check_step", "calculate"}
+    assert ctx.result.node_path == tuple(path)
+    assert ctx.result.query_count == len(calls)
     # Intermediate nodes must not publish candidates/results into graph state.
     for update in updates:
         for name, value in update.items():

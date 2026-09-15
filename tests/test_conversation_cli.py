@@ -10,6 +10,33 @@ from eda.conversation.fake import FakeConversationModel
 from eda.conversation.service import ConversationService
 
 
+@pytest.mark.parametrize("flags,expected", [([], 30.0), (["--timeout-seconds", "60"], 60.0)])
+def test_cli_timeout_reaches_shared_deadline(monkeypatch, fixture_db, tmp_path, capsys, flags, expected):
+    from eda.conversation.graph import TurnContext
+
+    original = TurnContext.__post_init__
+    seen = []
+
+    def inspect(ctx):
+        ctx.clock = lambda: 100.0
+        original(ctx)
+        seen.append((ctx.timeout_seconds, ctx.deadline))
+
+    monkeypatch.setattr(TurnContext, "__post_init__", inspect)
+    assert main(["2024年订单数", "--thread", "timeout", "--db", str(fixture_db),
+                 "--checkpoint-db", str(tmp_path / "cp.db"), *flags]) == 0
+    assert seen == [(expected, 100.0 + expected)]
+    assert json.loads(capsys.readouterr().out)["query_count"] == 1
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "NaN", "Infinity", "-Infinity", "121", "0.5"])
+def test_cli_invalid_timeout_before_service(monkeypatch, capsys, value):
+    monkeypatch.setattr("eda.conversation.cli.ConversationService",
+                        lambda *a, **kw: pytest.fail("invalid timeout must not create service"))
+    assert main(["订单数", "--thread", "a", "--timeout-seconds=" + value]) == 7
+    assert json.loads(capsys.readouterr().out)["error_code"] == "invalid_input"
+
+
 def test_cli_restarts_in_separate_processes(fixture_db, tmp_path):
     base = [sys.executable, "-m", "eda.conversation.cli", "--thread", "demo", "--db", str(fixture_db),
             "--checkpoint-db", str(tmp_path / "checkpoint.db")]

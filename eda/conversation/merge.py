@@ -5,20 +5,33 @@ from dataclasses import dataclass
 from eda.agent.dates import DateWindow
 from eda.plan.models import AnalysisPlan, parse_analysis_plan
 from eda.conversation.models import Draft, Session, TurnDecision, Values
+from eda.conversation.models import COMPARATIVE_OPERATIONS
+from eda.plan.comparative import ComparativeAnalysisPlan
 
 
 @dataclass
 class MergeResult:
-    plan: AnalysisPlan | None
+    plan: AnalysisPlan | ComparativeAnalysisPlan | None
     draft: Draft | None
     inherited: tuple[str, ...] = ()
     changed: tuple[str, ...] = ()
     cleared: tuple[str, ...] = ()
 
 
-def merge_decision(session: Session, decision: TurnDecision, dates: DateWindow) -> MergeResult:
+def merge_decision(session: Session, decision: TurnDecision, dates: DateWindow, question: str = "") -> MergeResult:
     if decision.status == "refuse":
         raise ValueError("refusal cannot be merged")
+    from eda.conversation.comparative import merge_comparative, requested_operation
+    operation = decision.patch.set.operation
+    comparative_history = ((decision.intent == "refine" and session.confirmed_type == "comparative" and session.confirmed)
+        or (decision.intent == "clarify_reply" and session.pending and session.pending.analysis_type == "comparative"))
+    if operation in COMPARATIVE_OPERATIONS or requested_operation(question) or (comparative_history and operation is None):
+        return merge_comparative(session, decision, question)
+    if decision.patch.set.current_period or decision.patch.set.baseline_period:
+        raise ValueError("single analysis cannot contain comparative periods")
+    if comparative_history:
+        # Crossing analysis types requires a fresh plan; no comparative fields leak.
+        session = session.model_copy(update={"confirmed": None, "pending": None, "confirmed_type": "single"})
     if decision.intent == "refine":
         base = dict(session.confirmed or {})
         missing = ["history"] if session.confirmed is None else []
@@ -73,12 +86,15 @@ def merge_decision(session: Session, decision: TurnDecision, dates: DateWindow) 
         return MergeResult(None, Draft(values=Values.model_validate(base), missing=tuple(dict.fromkeys(missing)), intent=decision.intent))
     plan = parse_analysis_plan(base)
     after = plan.model_dump(exclude_none=True)
+    return MergeResult(plan, None, *differences(before, after))
+
+
+def differences(before, after):
     # Compare leaf filter dimensions so selective clear is visible, not model prose.
     def flattened(value):
         return {**{key: item for key, item in value.items() if key != "filters"},
                 **{f"filters.{item['dimension_id']}": item for item in value.get("filters", ())}}
     old, new = flattened(before), flattened(after)
-    return MergeResult(plan, None,
-                       tuple(sorted(key for key in old if key in new and old[key] == new[key])),
+    return (tuple(sorted(key for key in old if key in new and old[key] == new[key])),
                        tuple(sorted(key for key in new if key not in old or old[key] != new[key])),
                        tuple(sorted(key for key in old if key not in new)))
