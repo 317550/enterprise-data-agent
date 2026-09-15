@@ -221,7 +221,8 @@ def _calculate(source, results):
             hidden_dimension_count=calculated_contribution.hidden_dimension_count,
             hidden_net_change=calculated_contribution.hidden_net_change,
         )
-    comparison = Comparison(**asdict(calculated))
+    comparison = Comparison(**asdict(calculated), baseline_period=source.baseline_period,
+                            current_period=source.current_period)
     return comparison, contribution
 
 
