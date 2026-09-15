@@ -12,13 +12,13 @@
 
 自由 Text-to-SQL 在本项目中**只作为评测基线**，不是默认执行路径。
 
-**当前进度：阶段 1、1.1、2、3、4A 与 4B-1/2/3 离线实现已完成**。阶段三新增
+**当前进度：阶段 1、1.1、2、3、4A、4B-1/2/3 与阶段 5 本地 Fake 界面已完成**。阶段三新增
 PlannerDecision → AnalysisPlan 单轮规划；默认 Fake 模型，无联网，真实规划
 需显式 `--provider real`。模型不能生成 SQL、访问数据库或解释数值。
 阶段 4A 新增最小 LangGraph、独立 SQLite checkpoint、thread 隔离、澄清续接、
 程序重启恢复和并发拒绝策略；多轮 CLI 默认 Fake，支持显式 `--provider real`
 及确定性 `--new-topic`。阶段 4B-1/2/3 增加严格比较业务计划、确定性 Decimal
-计算、两步比较/四步贡献执行，以及同一会话中的继承和恢复。Web 界面尚未实现，
+计算、两步比较/四步贡献执行，以及同一会话中的继承和恢复。阶段 5 已增加本地 Streamlit 界面、确定性展示和隐私审计，
 阶段 4B-3 已由用户手工完成 deepseek-flash 年份比较、同一 thread/checkpoint 的地区贡献及类别贡献三轮真实验证，均成功。
 协议、时间规则、预算和命令见[阶段三说明](docs/stage3-planning.md)。
 多轮协议、恢复边界和 CLI 示例见[阶段 4A 说明](docs/stage4a-conversation.md)。
@@ -65,7 +65,7 @@ Key 仅临时通过进程环境变量传入，验证后已清除。真实验证�
 | 解释器 | `.venv\Scripts\python.exe`，CPython 3.12.6 |
 | SQLite | 3.45.3（CPython 3.12.6 自带） |
 | `pip check` | `No broken requirements found.` |
-| `pytest -q -p no:cacheprovider` | **921 passed**（阶段 4B 输出契约修复；保留原 910 项回归） |
+| `pytest -q -p no:cacheprovider` | **978 passed**（阶段 5 最终恢复回归；保留原 921 项） |
 
 其他平台、其他 Python 版本（含计划里的 3.11）**均未验证**。
 
@@ -243,3 +243,27 @@ change_rate_display、两期 PeriodSpec 和 evidence_ids；贡献明细包含 di
 比例 12 位，展示为 ROUND_HALF_UP 两位百分比；无定义为 null / “无定义”。
 例如 fixture 月份比较 223200 → 232000，变化 8800，比例 "0.039426523297"，显示 "3.94%"。
 公共执行接口、会话服务和 CLI 共用该输出；详情见 [4B-2](docs/stage4b-2-comparative-execution.md)。
+
+## 阶段 5：本地证据界面
+
+在现有源码目录、已安装锁文件依赖且 fixture 已存在时启动（不要重建已有数据库）：
+
+```powershell
+.venv\Scripts\python.exe -m streamlit run app\streamlit_app.py --server.address 127.0.0.1 --server.port 8501 --server.headless true --browser.gatherUsageStats false
+```
+
+打开 http://127.0.0.1:8501，默认 Fake，可离线演示。依次提交“查看2024年2月成交额环比”、
+“按地区看变化贡献”、“改按类别看贡献”；勾选“新话题”后提交“2024年订单数”。
+金额保留分，表格保留 Decimal 精确字符串；图表不解释原因。
+刷新后输入原 thread_id 恢复业务状态，再提交新问题；不会恢复旧结果或消息历史。
+完成后在启动终端按 Ctrl+C。
+
+业务库固定为 data/fixture.db，独立状态为 data/ui-checkpoints.db，审计为 data/ui-audit.jsonl，
+均被现有 /data/ 忽略规则覆盖。界面不接受路径、URL 或上传文件。
+仅明确提交才调用服务；普通 rerun 和展开技术详情不会调用模型或重复审计。
+real 必须主动选择，Key 只来自进程环境；本阶段只验证 Fake/mock，未调用真实模型。
+
+Streamlit 1.63.0、Pandas 3.0.5、Plotly 7.0.0 与原约束一致，未升级。
+setuptools/wheel 是离线构建验证用开发依赖。eda.viz 与 eda.audit 已加入显式包清单；
+wheel 安装后仓库外包导入由测试验证。应用仍从源码启动，根目录语义 YAML 的完整分发未在本阶段扩展。
+设计、测试和限制见[阶段 5 验收](docs/stage5-evidence-ui.md)。
