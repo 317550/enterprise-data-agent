@@ -6,6 +6,7 @@ and model availability require a manual smoke test; automated tests stay offline
 
 import http.client
 import json
+import math
 import os
 from urllib.parse import urlsplit
 
@@ -26,20 +27,23 @@ class RealPlannerModel:
     def plan(self, question: str, context: dict) -> object:
         return self._request_json(question, context)
 
-    def _request_json(self, question: str, context: dict) -> object:
+    def _request_json(self, question: str, context: dict, *, timeout_seconds: float | None = None) -> object:
         """Shared one-shot HTTPS transport; callers own their business protocol."""
         # Read only the process environment, never Settings' .env-backed key.
         key = os.environ.get("DEEPSEEK_API_KEY")
         try:
             endpoint = urlsplit(self._base_url)
             port = endpoint.port
+            timeout = self._timeout if timeout_seconds is None else min(self._timeout, timeout_seconds)
+            if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
+                raise ValueError("invalid timeout")
             if not key or endpoint.scheme != "https" or not endpoint.hostname or endpoint.username is not None or endpoint.password is not None or endpoint.query or endpoint.fragment:
                 raise ValueError("invalid endpoint or key")
         except (ValueError, TypeError):
             raise ModelFailure("model_configuration_error") from None
         conn = None
         try:
-            conn = http.client.HTTPSConnection(endpoint.hostname, port, timeout=self._timeout)
+            conn = http.client.HTTPSConnection(endpoint.hostname, port, timeout=timeout)
             body = json.dumps({
                 "model": self.model_name,
                 "messages": [
@@ -51,6 +55,8 @@ class RealPlannerModel:
                 "max_tokens": self._max_tokens,
                 "stream": False,
             }, ensure_ascii=False).encode("utf-8")
+            if len(body) > MAX_OUTPUT_CHARS * 16:
+                raise ModelFailure("model_configuration_error")
             conn.request("POST", endpoint.path.rstrip("/") + "/chat/completions", body=body,
                          headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
             response = conn.getresponse()

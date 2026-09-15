@@ -4,6 +4,7 @@ import re
 
 from eda.agent.dates import resolve_dates
 from eda.agent.fake import FakePlannerModel
+from eda.conversation.comparative import requested_operation
 from eda.agent.models import (
     DATE_QUESTION, DIMENSION_QUESTION, FILTER_QUESTION, INVALID_DATE_QUESTION,
     METRIC_QUESTION, RANK_QUESTION, parse_decision,
@@ -11,7 +12,7 @@ from eda.agent.models import (
 
 
 class FakeConversationModel(FakePlannerModel):
-    model_name = "fake-conversation-v1"
+    model_name = "fake-conversation-v2"
 
     def plan(self, question: str, context: dict) -> object:
         if self._outputs is not None:
@@ -27,6 +28,35 @@ class FakeConversationModel(FakePlannerModel):
 
         def apply(values=None, **patch):
             return {"status": "apply", "intent": intent, "patch": {"set": values or {}, **patch}}
+
+        operation = requested_operation(text)
+        drill = re.fullmatch(r"(?:改为|改)?按(地区|类别)看(?:变化)?贡献", text)
+        if drill:
+            return apply({"operation": "contribution", "dimension_id": "region" if drill[1] == "地区" else "category"})
+        if pending and pending.get("analysis_type") == "comparative" and re.fullmatch(
+            r"\d{4}年(?:\d{1,2}月)?(?:和|与|、)\d{4}年(?:\d{1,2}月)?", text
+        ):
+            return apply()
+        if operation:
+            intent = "new"
+            # Reuse the finite single-period grammar for metrics/filters; dates
+            # are discarded here and rebuilt from the original question by code.
+            demo = re.sub(r"\d{4}年(?:\d{1,2}月)?", "", text)
+            for token in ("这个月", "上个月", "今年", "去年", "本月", "变化贡献", "贡献", "对比", "比较", "环比", "并", "查看", "看"):
+                demo = demo.replace(token, "")
+            single = parse_decision(FakePlannerModel().plan(demo + " " + context["reference_date"], context))
+            if single.status == "refuse":
+                return {"status": "refuse", "refusal_category": single.refusal_category}
+            if single.status == "clarify":
+                missing = {DATE_QUESTION: "dates", INVALID_DATE_QUESTION: "dates", METRIC_QUESTION: "metric_id",
+                           DIMENSION_QUESTION: "dimension_id", FILTER_QUESTION: "filters", RANK_QUESTION: "top_n"}
+                return {"status": "clarify", "intent": intent, "missing": [missing[single.clarification]],
+                        "patch": {"set": {"operation": operation}}}
+            values = single.plan.model_dump(exclude_none=True)
+            for key in ("start_date", "end_date", "order_by"):
+                values.pop(key, None)
+            values["operation"] = operation
+            return apply(values)
 
         clears = {"取消地区筛选": {"clear_filters": ["region"]},
                   "取消类别筛选": {"clear_filters": ["category"]},

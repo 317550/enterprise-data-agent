@@ -10,7 +10,7 @@
 | `semantic/dimensions.yaml` | 维度定义（来源字段、允许取值、允许操作、不可加声明） |
 | `semantic/relationships.yaml` | 表粒度与主键、关联键与基数、重复累计注意事项、分析视图 |
 
-三份文件都带 `schema_version`（当前 `1.0.0`）。
+三份文件都带 `schema_version`（当前 `1.1.0`）。
 
 金额单位统一为**整数「分」**。数据库中不存在任何浮点金额列，所以求和是精确的。
 
@@ -364,3 +364,9 @@ O007 是刻意设计的：客户 C003 注册地区是 `华南`，但这张订单
 演示数据只用于展示与压力测试，**不作为答案正确性的判据**。业务答案的正确性判据只有
 手工 fixture 与人工推导，以及独立参考计算（见
 [`evaluation/README.md`](../evaluation/README.md)）。
+
+## 阶段 4B-1 比较能力
+
+所有指标支持 compare/mom 的业务计算语义；贡献能力由必填 contribution_dimensions 和 additive_dimensions 控制。成交额、销量允许地区或类别贡献；有效订单数只允许地区贡献；客单价、去重客户数不允许贡献相加。地区与类别各自独立，不能合并求和。阶段二查询执行能力仍为 total/breakdown。
+
+语义版本 1.1.0 不兼容旧 1.0.0 checkpoint，不做静默迁移。字段、公式、舍入与期间规则详见 [阶段 4B-1](stage4b-1-comparative.md)。

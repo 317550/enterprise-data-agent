@@ -15,7 +15,8 @@ from eda.sql.executor import ExecutionLimits
 
 class ConversationService:
     def __init__(self, db_path: str | Path, checkpoint_db_path: str | Path, *, model: PlannerModel,
-                 reference_date: str | None = None, limits: ExecutionLimits | None = None):
+                 reference_date: str | None = None, limits: ExecutionLimits | None = None,
+                 timeout_seconds: float = 30.0):
         self.db_path = Path(db_path).resolve()
         self.checkpoint_db_path = checkpoint_path(checkpoint_db_path, self.db_path)
         self.model = model
@@ -23,6 +24,7 @@ class ConversationService:
         if reference_date is not None:
             strict_date(reference_date)
         self.limits = limits
+        self.timeout_seconds = timeout_seconds
 
     def _session(self, snapshot) -> Session:
         if not snapshot.values:
@@ -48,9 +50,10 @@ class ConversationService:
         path = checkpoint_path(self.checkpoint_db_path, self.db_path)
         with thread_lock(path, thread_id), open_checkpointer(path) as saver:
             graph = build_graph(saver)
-            config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 10}
+            config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 20}
             session = self._session(graph.get_state(config))
-            ctx = TurnContext(question, self.db_path, self.model, self.limits, new_topic=new_topic)
+            ctx = TurnContext(question, self.db_path, self.model, self.limits, new_topic=new_topic,
+                              timeout_seconds=self.timeout_seconds)
             # Always submit a new input. Never invoke(None) to replay an
             # unfinished task: its original Runtime.context is intentionally gone.
             graph.invoke({"session": session.model_dump(exclude_none=True)}, config,

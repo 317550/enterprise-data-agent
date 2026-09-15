@@ -13,12 +13,13 @@ class RealConversationModel(RealPlannerModel):
         # arbitrary context keys, caller rules, message history or query results.
         try:
             session = Session(reference_date=context["reference_date"],
-                              confirmed=context.get("confirmed"), pending=context.get("pending"))
+                              confirmed=context.get("confirmed"), pending=context.get("pending"),
+                              confirmed_type=context.get("confirmed_type", "single"))
             repair = "invalid_plan" if context.get("repair_error") == "invalid_plan" else None
             approved = planning_context(session, repair)
         except Exception:
             raise ModelFailure("model_configuration_error") from None
-        raw = self._request_json(question, approved)
+        raw = self._request_json(question, approved, timeout_seconds=context.get("remaining_seconds"))
         try:
             return parse_turn(raw)
         except DecisionError:

@@ -2,7 +2,7 @@
 
 基于**受控业务语义层**的**只读**经营数据分析 Agent：自然语言问题 →
 结构化分析计划 → 确定性 SQL 编译 → 安全校验与只读执行 → 结果与证据，
-当前支持单轮规划，以及阶段 4A 的严格多轮追问与本地会话恢复。
+当前支持单轮规划、多轮追问、本地会话恢复，以及阶段 4B-3 的期间比较、环比与单维度贡献下钻。
 
 > **这是一个本地、可复现、可测试的作品集项目，不声称生产就绪。**
 > 数据是虚构的电商经营数据，不含任何真实个人信息。
@@ -12,15 +12,28 @@
 
 自由 Text-to-SQL 在本项目中**只作为评测基线**，不是默认执行路径。
 
-**当前进度：阶段 1、1.1、2、3 与阶段 4A 离线实现已完成**。阶段三新增
+**当前进度：阶段 1、1.1、2、3、4A 与 4B-1/2/3 离线实现已完成**。阶段三新增
 PlannerDecision → AnalysisPlan 单轮规划；默认 Fake 模型，无联网，真实规划
 需显式 `--provider real`。模型不能生成 SQL、访问数据库或解释数值。
 阶段 4A 新增最小 LangGraph、独立 SQLite checkpoint、thread 隔离、澄清续接、
 程序重启恢复和并发拒绝策略；多轮 CLI 默认 Fake，支持显式 `--provider real`
-及确定性 `--new-topic`。Web 界面与阶段 4B 尚未实现，
-真实模型烟雾验证待用户手工执行。
+及确定性 `--new-topic`。阶段 4B-1/2/3 增加严格比较业务计划、确定性 Decimal
+计算、两步比较/四步贡献执行，以及同一会话中的继承和恢复。Web 界面尚未实现，
+阶段 4B-3 已由用户手工完成 deepseek-flash 年份比较、同一 thread/checkpoint 的地区贡献及类别贡献三轮真实验证，均成功。
 协议、时间规则、预算和命令见[阶段三说明](docs/stage3-planning.md)。
 多轮协议、恢复边界和 CLI 示例见[阶段 4A 说明](docs/stage4a-conversation.md)。
+比较协议、实际图路径、预算、checkpoint v2 与 Fake/Real 命令见
+[阶段 4B-3 说明](docs/stage4b-3-conversation.md)。语义版本保持 1.1.0；旧 conversation-v1
+checkpoint 明确拒绝，不自动迁移，请为本阶段使用新的状态文件。
+会话 CLI 可用 `--timeout-seconds 60` 指定本轮统一期限（1–120 秒，默认仍为 30）。
+Real 传输超时取 `LLM_TIMEOUT_SECONDS`（默认 60）与剩余总期限的较小值；
+手工验证前可设置 `$env:LLM_TIMEOUT_SECONDS = "60"`，避免已有较短配置提前截断。
+完整命令、离线超时诊断及用户反馈的真实验收结果见阶段 4B-3 文档；不增加重试或模型调用预算。
+三轮均使用 60 秒期限、conversation-plan-v2 / conversation-v2 / semantic 1.1.0，
+参考日期 2024-12-31；年份总变化及两种贡献分项合计均为 455200。
+验证前的间歇性 DNS 解析超时在调整 WLAN DNS 后排查通过，不能据此推断服务商停服。
+Key 仅临时通过进程环境变量传入，验证后已清除。真实验证仅覆盖上述三个受控场景；
+日历完整不等于数据覆盖已验证，也不证明全局可用性或不存在所有未知安全缺陷。
 完整分阶段状态与逐项追踪表见 [`docs/progress.md`](docs/progress.md)。
 
 ---
@@ -52,7 +65,7 @@ PlannerDecision → AnalysisPlan 单轮规划；默认 Fake 模型，无联网�
 | 解释器 | `.venv\Scripts\python.exe`，CPython 3.12.6 |
 | SQLite | 3.45.3（CPython 3.12.6 自带） |
 | `pip check` | `No broken requirements found.` |
-| `pytest -q -p no:cacheprovider` | **601 passed**（阶段 4A.1 最终审查后；保留原 596 项回归） |
+| `pytest -q -p no:cacheprovider` | **910 passed**（阶段 4B-3 超时修复；保留原 897 项回归） |
 
 其他平台、其他 Python 版本（含计划里的 3.11）**均未验证**。
 
@@ -159,8 +172,8 @@ echo %ERRORLEVEL%
 .venv\Scripts\python.exe -m eda.metrics.report --db data\fixture.db --show-definitions
 ```
 
-输出会分别列出每个指标的「已实现操作」与「待实现」——配置里声明「业务上支持」的操作
-（如 `compare`、`contribution`）当前**代码尚未实现**，请求时会明确报错，而不是给近似结果。
+此报表入口仍仅执行 `total` / `breakdown`，会分别列出该入口的「已实现操作」与「待实现」。
+`compare`、`mom` 与 `contribution` 通过比较执行接口及多轮会话 CLI 使用。
 
 ---
 

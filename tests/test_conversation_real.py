@@ -200,3 +200,64 @@ def test_real_receives_only_current_draft_and_filters_are_not_logged(monkeypatch
         saved = json.dumps([item._asdict() for item in saver.list({"configurable": {"thread_id": "a"}})], default=str)
     for forbidden in ("PRIVATE_PREVIOUS_QUESTION", "TEST_ONLY_KEY_SENTINEL", "messages", "decision_schema", "raw_response"):
         assert forbidden not in saved
+
+
+def test_real_comparative_mock_repair_and_restored_drill(monkeypatch, fixture_db, tmp_path):
+    compare = {"status": "apply", "intent": "new", "patch": {"set": {
+        "operation": "compare", "metric_id": "effective_order_gmv_cents"}}}
+    drill = {"status": "apply", "intent": "refine", "patch": {"set": {
+        "operation": "contribution", "dimension_id": "region"}}}
+    calls = transport(monkeypatch, ['{"sql":"private"}', json.dumps(compare), json.dumps(drill)])
+    path = tmp_path / "cp.db"
+    first = ConversationService(fixture_db, path, model=RealConversationModel(), reference_date="2024-12-31")
+    result = first.run("a", "对比2024年2月和2024年1月的成交额")
+    assert result.status == "success" and result.model_call_count == 2 and result.query_count == 2
+    second = ConversationService(fixture_db, path, model=RealConversationModel())
+    result = second.run("a", "按地区看变化贡献")
+    assert result.status == "success" and result.query_count == 4 and result.model_call_count == 1
+    sent = json.loads(calls[2]["body"]["messages"][0]["content"].split("\n", 1)[1])
+    assert sent["confirmed_type"] == "comparative"
+    assert sent["confirmed"]["baseline_period"]["start_date"] == "2024-01-01"
+    assert "remaining_seconds" not in sent and "comparison" not in sent["confirmed"]
+    assert all(call["timeout"] <= 30 for call in calls)
+
+
+def test_real_shared_transport_honors_remaining_timeout_and_request_bound(monkeypatch):
+    calls = transport(monkeypatch, [json.dumps(turn())])
+    model = RealConversationModel()
+    context = prompt()
+    context["remaining_seconds"] = 0.25
+    assert model.plan("订单数", context).status == "apply"
+    assert calls[0]["timeout"] == 0.25
+    with pytest.raises(ModelFailure, match="model_configuration_error"):
+        model._request_json("x" * (MAX_OUTPUT_CHARS * 17), {})
+    assert "body" not in calls[-1] and calls[-1]["closed"]
+
+
+@pytest.mark.parametrize("configured,remaining,expected", [(60, 57, 57), (15, 57, 15), (120, 0.25, 0.25)])
+def test_real_configured_and_remaining_timeout_minimum(monkeypatch, configured, remaining, expected):
+    monkeypatch.setenv("LLM_TIMEOUT_SECONDS", str(configured))
+    calls = transport(monkeypatch, [json.dumps(turn())])
+    context = prompt()
+    context["remaining_seconds"] = remaining
+    assert RealConversationModel().plan("订单数", context).status == "apply"
+    assert calls[0]["timeout"] == expected
+
+
+def test_cli_real_timeout_terminal_with_extended_budget(monkeypatch, fixture_db, tmp_path, capsys, caplog):
+    monkeypatch.setenv("LLM_TIMEOUT_SECONDS", "60")
+    calls = transport(monkeypatch, failure=TimeoutError("PRIVATE_TIMEOUT_SENTINEL"))
+    monkeypatch.setattr("eda.conversation.graph.run_analysis_plan",
+                        lambda *a, **kw: pytest.fail("timeout must not execute SQL"))
+    with caplog.at_level(logging.DEBUG):
+        code = main(["2024年订单数 PRIVATE_QUESTION_SENTINEL", "--thread", "timeout", "--provider", "real",
+                     "--db", str(fixture_db), "--checkpoint-db", str(tmp_path / "cp.db"),
+                     "--timeout-seconds", "60"])
+    output = capsys.readouterr().out
+    result = json.loads(output)
+    assert code == 4 and result["error_code"] == "model_timeout"
+    assert result["node_path"] == ["begin", "plan", "finalize"]
+    assert result["model_call_count"] == len(calls) == 1 and result["query_count"] == 0
+    assert 30 < calls[0]["timeout"] <= 60 and calls[0]["closed"]
+    for token in ("PRIVATE_TIMEOUT_SENTINEL", "PRIVATE_QUESTION_SENTINEL", "TEST_ONLY_KEY_SENTINEL", "decision_schema"):
+        assert token not in output + caplog.text

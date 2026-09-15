@@ -15,7 +15,7 @@
 # 修改本文件后必须同步 docs/metrics.md，并让 tests/test_semantic_config.py 与
 # tests/test_semantic_consistency.py 全绿。
 # ---------------------------------------------------------------------------
-schema_version: "1.0.0"
+schema_version: "1.1.0"
 
 notes_zh: >-
   supported_operations 描述的是「该指标在业务上支持哪些分析操作」；当前**已实现**的操作由代码常量 eda.metrics.operations.IMPLEMENTED_ANALYSIS_OPERATIONS 声明，两者由测试校验（已实现必须是受支持的子集）。阶段 2 已实现 total / breakdown（含简单排名）；多步对比与贡献拆解的计划编译留到阶段四。
@@ -35,7 +35,9 @@ metrics:
       operation: sum
       input_fields: ["line_amount_cents"]
     additive: true
-    supported_operations: ["total", "breakdown", "time_series", "compare", "contribution"]
+    additive_dimensions: ["month", "date", "region", "category", "channel", "product"]
+    contribution_dimensions: ["region", "category"]
+    supported_operations: ["total", "breakdown", "time_series", "compare", "mom", "contribution"]
     status_include: ["paid", "completed"]
     status_exclude: ["pending", "cancelled", "refunded"]
     filter_policy_zh: >-
@@ -67,7 +69,9 @@ metrics:
       operation: count_distinct
       input_fields: ["order_id"]
     additive: false
-    supported_operations: ["total", "breakdown", "time_series", "compare"]
+    additive_dimensions: ["month", "date", "region", "channel"]
+    contribution_dimensions: ["region"]
+    supported_operations: ["total", "breakdown", "time_series", "compare", "mom", "contribution"]
     status_include: ["paid", "completed"]
     status_exclude: ["pending", "cancelled", "refunded"]
     filter_policy_zh: >-
@@ -99,7 +103,9 @@ metrics:
       numerator_metric: effective_order_gmv_cents
       denominator_metric: valid_order_count
     additive: false
-    supported_operations: ["total", "breakdown", "time_series", "compare"]
+    additive_dimensions: []
+    contribution_dimensions: []
+    supported_operations: ["total", "breakdown", "time_series", "compare", "mom"]
     status_include: ["paid", "completed"]
     status_exclude: ["pending", "cancelled", "refunded"]
     filter_policy_zh: >-
@@ -132,7 +138,9 @@ metrics:
       operation: sum
       input_fields: ["quantity"]
     additive: true
-    supported_operations: ["total", "breakdown", "time_series", "compare", "contribution"]
+    additive_dimensions: ["month", "date", "region", "category", "channel", "product"]
+    contribution_dimensions: ["region", "category"]
+    supported_operations: ["total", "breakdown", "time_series", "compare", "mom", "contribution"]
     status_include: ["paid", "completed"]
     status_exclude: ["pending", "cancelled", "refunded"]
     filter_policy_zh: >-
@@ -160,7 +168,9 @@ metrics:
       operation: count_distinct
       input_fields: ["customer_id"]
     additive: false
-    supported_operations: ["total", "breakdown", "time_series", "compare"]
+    additive_dimensions: []
+    contribution_dimensions: []
+    supported_operations: ["total", "breakdown", "time_series", "compare", "mom"]
     status_include: ["paid", "completed"]
     status_exclude: ["pending", "cancelled", "refunded"]
     filter_policy_zh: >-

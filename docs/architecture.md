@@ -2,10 +2,12 @@
 
 本项目是一个**本地可复现、可测试的作品集项目**，不声称生产就绪。
 
-**当前项目定位（阶段 4A 更新）**：基于受控业务语义层的经营分析 Agent。
+**当前项目定位（阶段 4B-3 更新）**：基于受控业务语义层的经营分析 Agent。
 原[阶段三单轮接口](stage3-planning.md) 保持兼容；新增
 [阶段 4A 严格多轮接口](stage4a-conversation.md)，使用最小 LangGraph 与独立
 SQLite checkpoint。模型不接触 SQL 或数据库，也不负责第二次结果解释。
+同一个图现支持 compare/mom/contribution，复用确定性编译和 Decimal 计算；
+会话与证据边界详见[阶段 4B-3](stage4b-3-conversation.md)。
 
 不是「把自然语言翻译成 SQL」，而是「把自然语言映射到受控的业务语义，再由确定性代码
 编译成 SQL」。这个区别决定了后面所有设计。
@@ -51,8 +53,9 @@ SQLite checkpoint。模型不接触 SQL 或数据库，也不负责第二次结�
 | 5 | 结论证据校验、受控图表、Streamlit 界面与运行记录 |
 | 6 | 对照实验、独立保留集评测、离线 CI 与发布检查 |
 
-阶段 1、1.1、2、3 与阶段 4A 离线实现已完成；阶段 4B 尚未开始。
-真实模型验证待手工执行。逐项状态见
+阶段 1、1.1、2、3、4A 与 4B-1/2/3 离线实现已完成。
+阶段 4B-3 的 deepseek-flash 年份比较、地区贡献和类别贡献已由用户手工验证成功；
+阶段 3/4A 的独立历史验证记录不变。逐项状态见
 [`docs/progress.md`](progress.md) 的追踪表。
 
 ---
@@ -137,7 +140,8 @@ CLI 默认 fake，显式 --provider real 才联网；--new-topic 由代码清空
 
 `metrics.yaml` 里的 `supported_operations` 是**业务陈述**（这个指标在业务上支持对比、
 贡献拆解等操作）；当前**代码实现了什么**由 `eda.metrics.operations.
-IMPLEMENTED_ANALYSIS_OPERATIONS` 声明，目前只有 `total` 和 `breakdown`。
+IMPLEMENTED_ANALYSIS_OPERATIONS` 声明，该报表入口目前只有 `total` 和 `breakdown`。
+阶段 4B 的比较、环比和贡献通过独立比较计划及会话入口执行。
 
 请求一个尚未实现的操作会抛 `UnsupportedOperationError`，而不是静默给出近似结果。
 `report --show-definitions` 会分别打印「已实现操作」和「待实现」。
@@ -298,7 +302,7 @@ eda/
     service.py             # 计划闭环：parse → compile → execute → 结构化结果
     cli.py                 # 薄 CLI：读 JSON 计划
   agent/                   # 原单轮接口与共享一次 HTTPS 传输
-  conversation/            # TurnDecision、五节点图、恢复/锁、Fake/real 与 CLI
+  conversation/            # 扩展 TurnDecision、单期间/比较图、恢复/锁、Fake/real 与 CLI
 ```
 
 **定义、编译、执行三者分离**是这里的关键：YAML 负责定义，`operations.py` +
@@ -308,20 +312,34 @@ eda/
 
 ---
 
-## 7. 后续阶段的落点（尚未实现）
+## 7. 各阶段模块与后续落点
 
 | 阶段 | 新增模块 | 要点 |
 |---|---|---|
 | 2（已完成） | `eda/plan/`、`eda/sql/`、`eda/query/` | AnalysisPlan schema 与校验、确定性 SQL 编译器、SQLGlot AST 校验、SQLite authorizer、行数/超时上限、对抗测试 |
 | 3（离线实现完成） | `eda/agent/` | PlannerDecision、Fake/真实规划适配器、严格日期和计划校验、最多两次模型调用；真实烟雾验证待执行 |
 | 4A / 4A.1（离线完成） | `eda/conversation/` | 五节点多轮协议、独立 checkpoint、thread 隔离、显式新话题；真实烟雾验证待执行 |
-| 4B（未开始） | `eda/plan/multistep.py`（待建） | 有限多步对比与贡献拆解（数值分解，非因果） |
+| 4B-1/2/3（已接入） | `eda/plan/comparative*.py`、`eda/query/comparative*.py`、`eda/conversation/` | 两步比较/环比、四步贡献、单维度下钻、checkpoint v2；4B-3 三个受控场景真实验证成功 |
 | 5 | `app/streamlit_app.py`、`eda/viz/`、`eda/audit/` | 结论证据校验、受控确定性图表、运行记录与追溯 |
 | 6 | `evaluation/dev/`、`evaluation/heldout/`、`evaluation/runs/` | 对照实验（语义层 vs 自由 Text-to-SQL 基线）、独立保留集评测、离线 CI、发布检查 |
 
 ---
 
 ## 8. 技术选型与版本
+
+阶段 4B-3 在原 begin → plan → merge → execute → finalize 路径之外，通过 merge
+条件边进入 prepare_analysis → execute_step → check_step → calculate → finalize。
+check_step 最多返回 execute_step 三次；成功 compare/mom 执行两个子计划，贡献执行
+四个子计划，失败立即 finalize。规划最多两次，模型不进入执行循环。
+prepare/execute/check/calculate 与 run_comparative_analysis 共享实现；阶段二 SQLGlot、
+authorizer、只读连接和执行器保持原样。
+
+所有阶段使用本轮同一个绝对 deadline，子查询 timeout 收紧到剩余时间。
+GraphState 仍只有 session；业务持久化增加 confirmed_type 与 pending.analysis_type，
+明确区分单期间、比较与比较草稿，state_version=conversation-v2，semantic_version=1.1.0。
+问题、prompt、原始响应、预算、SQL、结果和证据只留在 Runtime.context，禁止落盘。
+已验证且恢复所需的业务筛选值可以随业务计划保存。沿用原 thread_lock 和 SqliteSaver，
+无第二套 thread 状态或数据库管理实现。
 
 Python 计划写的是 3.11；本机没有 3.11，实际使用 **3.12.6**（LangGraph 1.2.x 要求
 `>=3.10`，其余依赖均支持 3.12）。`pyproject.toml` 声明 `requires-python = ">=3.11,<3.14"`。
@@ -331,7 +349,14 @@ Python 计划写的是 3.11；本机没有 3.11，实际使用 **3.12.6**（Lang
 
 DeepSeek 的模型名与 Base URL 取自官方文档（https://api-docs.deepseek.com/ ），
 不靠记忆猜测；当前文档给出的模型是 `deepseek-flash` 与 `deepseek-v4-pro`，
-Base URL 为 `https://api.deepseek.com`（OpenAI 兼容格式）。**尚未经过真实调用验证。**
+Base URL 为 `https://api.deepseek.com`（OpenAI 兼容格式）。用户已反馈 `deepseek-flash`
+在阶段 4B-3 的三个受控场景真实调用成功；不将该结果扩展到其他模型或阶段的独立验收。
+三轮均使用 conversation-plan-v2、conversation-v2、semantic_version=1.1.0、
+reference_date=2024-12-31、timeout_seconds=60，同一 thread/checkpoint 连续处理比较和两次下钻。
+首次 recovered=true 表示恢复此前 in_progress 状态后处理新输入，不是结果重放；
+后两轮 recovered=false。数值和环境排查详情见 [4B-3 真实验收](stage4b-3-conversation.md)。
+calendar_period_complete=true 不代表 data_coverage_verified=true；本次验证不证明
+DeepSeek 全局可用性，也不证明系统不存在所有未知安全缺陷。
 
 不引入需求之外的东西：没有微服务、没有 Redis、没有向量数据库、没有多 Agent 框架、
 没有额外的 ORM。语义层是三份 YAML 加一个 Pydantic 加载器，不是一个新框架。

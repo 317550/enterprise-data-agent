@@ -69,7 +69,7 @@ def test_fake_grammar_and_actual_query_pipeline(fixture_db, expected_fixture_met
     assert result.plan.top_n == top_n
     assert result.analysis_result.execution.sql == compile_plan(result.plan).sql
     assert result.query_id == result.analysis_result.query_id
-    assert result.semantic_version == "1.0.0"
+    assert result.semantic_version == "1.1.0"
     assert result.prompt_version == "nl-plan-v1"
     assert (result.start_date, result.end_date) == ("2024-01-01", "2024-12-31")
     if metric == GMV_METRIC_ID and dimension is None:
