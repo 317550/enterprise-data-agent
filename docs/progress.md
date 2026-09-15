@@ -83,7 +83,7 @@ business.db 与 fixture.db 的 SHA256 / mtime 均未变化。旧记录中“空 
 | 2 | 结构化 AnalysisPlan 校验、确定性 SQL 编译器、统一只读安全执行器 | ✅ 已完成（2026-09-13） |
 | 3 | 自然语言 → AnalysisPlan 单轮规划、澄清/拒绝与一次计划修复 | ✅ 离线实现完成；真实烟雾验证待执行 |
 | 4 | 多轮追问与持久化；有限多步对比与贡献拆解 | ✅ 4A 与 4B-1/2/3 离线完成（2026-09-15）；4B-3 三个受控场景真实验证成功 |
-| 5 | 结论证据校验、受控图表、Streamlit 界面与运行记录 | ⬜ 未开始 |
+| 5 | 结论证据校验、受控图表、Streamlit 界面与运行记录 | ✅ 本地 Fake 完成；978 passed；持久化与打包限制见阶段 5 记录 |
 | 6 | 对照实验、独立保留集评测、离线 CI 与发布检查 | ⬜ 未开始 |
 
 **项目定位（阶段 1.1 更新）**：基于 LangGraph 与业务语义层的经营分析 Agent。
@@ -462,3 +462,30 @@ README.md / docs/architecture.md / docs/progress.md
 pip check 返回 No broken requirements found；git diff --check 通过，新增测试文件
 UTF-8/AST/尾随空白检查通过。测试使用新专用临时目录，项目运行时数据库未修改或删除。
 未调用真实模型，未提交、推送、操作 stash 或切换分支。停止于本次输出契约修复。
+
+## 2026-09-15 阶段 5 增量恢复
+
+分支 feat/evidence-visualization-ui，HEAD 5247c44，保留中断前全部未提交实现。
+恢复说明优先于附件首次开工规则；只读检查后完整读取现场，未操作备份 stash。
+新增 eda.viz、eda.audit、Streamlit 源码入口与本地监听配置，显式 packages 已同步。
+原服务、LangGraph/checkpoint/thread_lock、查询/安全实现、语义与 fixture 不变。
+
+确定性 ChartSpec/ViewModel、单值/比较/环比/单维度贡献图表、证据映射、固定错误脱敏、
+JSONL 白名单与路径隔离、幂等审计、st.form 提交与浏览器状态恢复均已实现。
+本次仅补服务前错误的安全追踪信息和包含审计的 UI 总耗时，并增加两项离线用例。
+相关定向 5 passed, 44 deselected in 16.10s；首次沙箱临时目录权限失败后，
+使用另一全新目录在沙箱外通过。未重复中断前已通过的 123 项定向集合。
+
+浏览器 Fake 月度环比、地区转类别贡献、刷新恢复与新输入、普通 rerun 均核对。
+实际监听仅 127.0.0.1:8501；rerun 前后审计 9 行、SHA256 完全相同，request_id 与 1/4 调用计数不变。
+完整设计、测试、数据库基线和已知限制见[阶段 5 验收](stage5-evidence-ui.md)。
+仍只支持源码本地演示；原 checkpoint 的受控业务筛选值持久化行为保持，未新增原始消息或查询结果存储。
+
+本次唯一最终完整回归 **978 passed in 162.62s (0:02:42)**，exit 0。
+使用全新 eda-stage5-final-resume-d4f7ddd86d664570a0c42fde3dcd698a basetemp；
+原 921 项保留，49 项阶段 5 测试（包含 AppTest 与离线 wheel 安装导入）及 8 项新增模块约束通过。
+澄清、新话题订单合计 5 单、敏感信息检查也在浏览器完成；Ctrl+C 停止服务器，8501 无监听。
+未调用真实模型或进行任何 Git 提交/分支/stash 操作；阶段 6 未开始。
+
+最终 pip check 无依赖冲突，diff check 通过；两个业务数据库 SHA256/UTC mtime 与基线一致。
+受保护源码无改动，.env、运行时状态/审计与锁未进入 Git。完整文件清单与最终 status 见阶段 5 文档。

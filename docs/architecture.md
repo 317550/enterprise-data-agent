@@ -2,7 +2,7 @@
 
 本项目是一个**本地可复现、可测试的作品集项目**，不声称生产就绪。
 
-**当前项目定位（阶段 4B-3 更新）**：基于受控业务语义层的经营分析 Agent。
+**当前项目定位（阶段 5 更新）**：基于受控业务语义层的经营分析 Agent，带本地 Fake 证据界面。
 原[阶段三单轮接口](stage3-planning.md) 保持兼容；新增
 [阶段 4A 严格多轮接口](stage4a-conversation.md)，使用最小 LangGraph 与独立
 SQLite checkpoint。模型不接触 SQL 或数据库，也不负责第二次结果解释。
@@ -53,7 +53,7 @@ SQLite checkpoint。模型不接触 SQL 或数据库，也不负责第二次结�
 | 5 | 结论证据校验、受控图表、Streamlit 界面与运行记录 |
 | 6 | 对照实验、独立保留集评测、离线 CI 与发布检查 |
 
-阶段 1、1.1、2、3、4A 与 4B-1/2/3 离线实现已完成。
+阶段 1、1.1、2、3、4A、4B-1/2/3 与阶段 5 本地 Fake 界面离线实现已完成。
 阶段 4B-3 的 deepseek-flash 年份比较、地区贡献和类别贡献已由用户手工验证成功；
 阶段 3/4A 的独立历史验证记录不变。逐项状态见
 [`docs/progress.md`](progress.md) 的追踪表。
@@ -161,7 +161,7 @@ IMPLEMENTED_ANALYSIS_OPERATIONS` 声明，该报表入口目前只有 `total` �
 
 ### 5.1 绝不执行模型生成的代码
 
-模型只允许输出两种东西：**结构化 JSON**（分析计划）和**解释文字**。
+模型只允许输出受控的**结构化 JSON**（规划协议），不生成计算值、图表代码或原因解释。
 阶段 2 之后连 SQL 都由代码编译，模型不再直接产出执行用 SQL（自由 Text-to-SQL 基线除外，
 它同样必须过安全执行器）。代码里没有 `eval` / `exec` / `compile` / `subprocess`，
 `tests/test_project_constraints.py::test_no_dynamic_code_execution` 在语法树上逐文件强制。
@@ -369,3 +369,35 @@ eda/query/comparative_models.py 是公共执行接口与会话/CLI 共同的输�
 贡献明细提供 absolute_change 与 contribution_rate_display，旧字段均保留。
 Decimal JSON 字符串和比例精度不变，未定义显示“无定义”。
 详见 [4B-2 输出示例](stage4b-2-comparative-execution.md)。
+
+## 9. 阶段 5 展示与隐私运行记录
+
+app/streamlit_app.py → eda.viz.runtime.submit → 原 ConversationService → 原 LangGraph、
+checkpoint、thread_lock 与安全执行器 → TurnResult → to_view → ChartSpec/Plotly。
+展示层复用既有 Decimal 结果和证据，不编译 SQL，不新增指标公式或查询入口。
+
+ChartSpec 使用严格、禁止额外字段的封闭词表，已有实例也递归导出重验。
+图表只接收 category/period 与 value/change 等展示坐标，渲染前检查坐标存在和完整性。
+total 无图；完整 breakdown/ranking 为柱图；compare 为两期柱图；mom 为实际日期排序的两点折线；
+contribution 为单维度正负柱图，并保留 top_n 隐藏数量/变化量。截断、非完整总体、空或失败不绘图。
+只有 Plotly 渲染转为浮点，表格仍是精确字符串，金额默认分。
+
+ViewModel 把七种状态映射为固定文案；成功含计划、指标、期间、KPI、行、完整性、受控 warnings、
+证据映射及技术元数据。只允许 observation/decomposition。SQL 仅来自已有单期间 execution.sql，
+只在折叠详情显示；comparative 仅显示执行计划和 evidence_id/query_id，不重编译取 SQL。
+
+st.form 的明确提交分支最多调用服务一次，processing 阻止处理中的浏览器重复提交。
+session_state 保存 thread/provider/reference_date、展示消息、last_response、last_submission_id；
+响应先保存再渲染。浏览器状态不承担持久化；恢复调用原 inspect，下一次输入才 run，不 invoke(None)。
+新建仅换 thread 并清空当前展示，不删除 checkpoint。跨进程 thread 互斥沿用原 OS 文件锁。
+
+审计独立 JSONL 使用 AuditRecord 白名单和 request_id/run_id 幂等，复用非阻塞锁，
+写前及锁内复查路径/文件 schema，拒绝业务库、checkpoint、相同文件别名和硬链接。
+文件超过 8 MiB 拒写，失败返回固定 audit_warning，不改变分析结果。无新增 SQLite 连接。
+记录仅含身份摘要、状态/版本/预算/耗时/错误类别/完整性和证据 ID 映射，不含业务内容。
+界面 elapsed_ms 包含本次审计调用；审计中 elapsed_ms 是写入前已完成的处理耗时。
+
+边界：沿用阶段 4B checkpoint 中已验证的业务计划（包括恢复所需的受控筛选值）；
+不新增问题、prompt、原始响应、SQL、结果持久化。该既有行为与“所有筛选值均不得进 checkpoint”
+的字面要求有差异，本阶段遵循复用原 checkpoint 的恢复约束，未改写阶段 4B 协议。
+完整白名单、离线证据和限制见[阶段 5](stage5-evidence-ui.md)。
