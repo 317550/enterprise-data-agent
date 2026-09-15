@@ -336,3 +336,41 @@ tests/test_conversation_real.py、README.md 和本文件，保留其余阶段 4B
 pip check 返回 No broken requirements found；git diff --check 及 UTF-8/AST/尾随空白检查通过。
 数据库 SHA256/mtime 保持上述基线；该离线超时修复当时未调用真实模型，
 未操作 stash、提交或切换分支。后续用户真实验收结果见 Real 节。
+
+## 阶段 4B 最终输出契约修复
+
+输出缺口位于 4B-2 的共享结果模型：4B-1 已有 Decimal 计算和 display_decimal，
+4B-2 原先仅输出 current/baseline、dimension_change 及原始比例，4B-3 直接沿用。
+现在 comparison 增加 baseline_value、current_value、change_rate_display、
+baseline_period、current_period，保留 absolute_change、change_rate、evidence_ids
+及旧 current/baseline。外层 baseline_period/current_period 也继续保留。
+贡献 rows 每条增加 baseline_value、current_value、absolute_change、
+contribution_rate_display，保留 dimension_value、contribution_rate、evidence_ids
+及旧 current/baseline/dimension_change。
+
+兼容字段由共享结果模型从既有精确字段确定性派生，展示仅调用已有 display_decimal；
+没有复制计算公式。比例保持 12 位 Decimal，JSON 精确值为字符串；展示使用
+ROUND_HALF_UP 两位百分比。无定义比例保持 null，展示字符串为“无定义”。
+模型不生成展示值。run_comparative_analysis、ConversationService 与 Fake CLI
+使用同一结果模型，三条输出路径一致；checkpoint 不保存这些结果字段。
+
+离线 fixture 比较示例（comparison 中的部分字段）：
+
+```json
+{"baseline_value":"223200","current_value":"232000","absolute_change":"8800","change_rate":"0.039426523297","change_rate_display":"3.94%","baseline":"223200","current":"232000","evidence_ids":["baseline_total","current_total"]}
+```
+
+同一对象内 baseline_period 为 2024-01-01 至 2024-01-31，current_period 为
+2024-02-01 至 2024-02-29，含完整 PeriodSpec 元数据，与外层期间一致。
+零基期年份比较仍为 baseline_value="0"、current_value="455200"、
+change_rate=null、change_rate_display="无定义"。
+离线合成贡献用例验证 0.500000000000 → 50.00%、-0.500000000000 → -50.00%、
+1.500000000000 → 150.00%；总变化为零时 null → 无定义。
+
+本次未改模型协议、图结构、查询预算、SQL 编译器、安全执行器、语义公式或
+checkpoint 白名单；失败响应不增加结果字段。没有调用真实模型或修改项目运行时数据库。
+
+最终离线回归：**921 passed in 110.81s**（exit 0），保留原 910 项、新增 11 项。
+pip check 返回 No broken requirements found；git diff --check 通过，新增测试文件
+UTF-8/AST/尾随空白检查通过。测试使用新专用临时目录，项目运行时数据库未修改或删除。
+未调用真实模型，未提交、推送、操作 stash 或切换分支。停止于本次输出契约修复。

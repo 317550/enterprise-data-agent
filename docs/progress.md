@@ -448,3 +448,17 @@ README.md / docs/architecture.md / docs/progress.md
 开始前确认 feat/comparative-analysis、干净工作区、PR #4 合并提交 01b65aa，离线基线 601 passed in 30.36s。新增严格比较计划、完整日历期间、配置驱动可加性和纯 Decimal 比较/贡献计算。三份语义 YAML 与 SUPPORTED_SCHEMA_VERSION 同步升级 1.0.0 → 1.1.0，原 4A checkpoint 明确拒绝，不静默迁移。未修改阶段二执行器、会话图或 CLI；未接入自然语言规划、数据库查询或真实模型。详见 [阶段 4B-1](stage4b-1-comparative.md)。
 
 最终定向 233 passed in 6.62s；完整回归 711 passed in 30.34s（保留原 601 项）。git diff --check 通过。停止于 4B-1，等待 4B-2；未提交或推送。
+
+## 阶段 4B 最终输出契约修复
+
+在 fix/comparative-output-contract 上补齐共享结果模型的明确值字段、比例展示及
+比较对象内两期，兼容保留 current/baseline/dimension_change。
+复用既有 Decimal 计算和格式化函数，生产改动仅涉及两个 query 模块。
+新增 11 项离线用例，覆盖比例边界、公共接口/会话/Fake CLI 一致性、旧字段和 checkpoint 隔离。
+初次定向用例执行未显示失败，但 pytest 退出清理旧 pytest-current 时 WinError 5，
+因此不将该次运行记为验收通过；改用全新专用测试临时目录，未删除旧目录。
+
+最终离线回归：**921 passed in 110.81s**（exit 0），保留原 910 项、新增 11 项。
+pip check 返回 No broken requirements found；git diff --check 通过，新增测试文件
+UTF-8/AST/尾随空白检查通过。测试使用新专用临时目录，项目运行时数据库未修改或删除。
+未调用真实模型，未提交、推送、操作 stash 或切换分支。停止于本次输出契约修复。

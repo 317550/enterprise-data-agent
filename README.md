@@ -65,7 +65,7 @@ Key 仅临时通过进程环境变量传入，验证后已清除。真实验证�
 | 解释器 | `.venv\Scripts\python.exe`，CPython 3.12.6 |
 | SQLite | 3.45.3（CPython 3.12.6 自带） |
 | `pip check` | `No broken requirements found.` |
-| `pytest -q -p no:cacheprovider` | **910 passed**（阶段 4B-3 超时修复；保留原 897 项回归） |
+| `pytest -q -p no:cacheprovider` | **921 passed**（阶段 4B 输出契约修复；保留原 910 项回归） |
 
 其他平台、其他 Python 版本（含计划里的 3.11）**均未验证**。
 
@@ -233,3 +233,13 @@ enterprise_data_agent/
 **费用控制**：自动化测试全部离线。阶段三真实调用只能手工传 `--provider real`，
 Key 仅从进程环境 `DEEPSEEK_API_KEY` 读取，`.env` 中的 Key 不启用真实适配器。
 每请求最多两次模型调用（规划 + 一次计划修复），没有 SQL 修复或解释调用。
+
+### 比较与贡献输出契约
+
+比较输出包含 baseline_value、current_value、absolute_change、change_rate、
+change_rate_display、两期 PeriodSpec 和 evidence_ids；贡献明细包含 dimension_value、
+两期值、absolute_change、contribution_rate、contribution_rate_display 和 evidence_ids。
+旧 baseline/current/dimension_change 字段兼容保留。Decimal JSON 为精确字符串，
+比例 12 位，展示为 ROUND_HALF_UP 两位百分比；无定义为 null / “无定义”。
+例如 fixture 月份比较 223200 → 232000，变化 8800，比例 "0.039426523297"，显示 "3.94%"。
+公共执行接口、会话服务和 CLI 共用该输出；详情见 [4B-2](docs/stage4b-2-comparative-execution.md)。

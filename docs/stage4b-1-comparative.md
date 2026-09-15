@@ -101,3 +101,10 @@ current、baseline 和变化量保留精确十进制值；循环小数比例按 
 - ??：tests/test_comparative_calculation.py、tests/test_comparative_plan.py。
 
 eda/sql、eda/query、eda/conversation、eda/agent 及原 eda/plan/models.py 无修改。
+
+## 后续输出契约衔接
+
+最终输出契约修复继续复用本阶段 calculate_comparison、calculate_contribution 与
+display_decimal（ROUND_HALF_UP、两位百分比、无定义显示“无定义”）。纯计算 dataclass
+及 display_zh 行为不变。4B-2 的对外模型增加明确值字段和比例展示值，保留旧字段；
+详见 [4B-2 输出契约](stage4b-2-comparative-execution.md)。

@@ -3,7 +3,9 @@
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
+
+from eda.metrics.comparative import display_decimal
 
 from eda.plan.comparative import PeriodSpec, StrictComparativeModel
 from eda.plan.comparative_execution import ComparativeExecutionStep
@@ -35,9 +37,22 @@ class Comparison(StrictComparativeModel):
     baseline: Decimal = Field(allow_inf_nan=False)
     absolute_change: Decimal = Field(allow_inf_nan=False)
     change_rate: Decimal | None = Field(allow_inf_nan=False)
+    baseline_value: Decimal = Decimal(0)
+    current_value: Decimal = Decimal(0)
+    change_rate_display: str = ""
+    baseline_period: PeriodSpec | None = None
+    current_period: PeriodSpec | None = None
     evidence_ids: tuple[Literal["baseline_total"], Literal["current_total"]] = (
         "baseline_total", "current_total",
     )
+
+    @model_validator(mode="after")
+    def canonical_output(self):
+        # Derived compatibility fields cannot disagree with the exact values.
+        object.__setattr__(self, "baseline_value", self.baseline)
+        object.__setattr__(self, "current_value", self.current)
+        object.__setattr__(self, "change_rate_display", display_decimal(self.change_rate, percent=True))
+        return self
 
 
 class ContributionDetail(StrictComparativeModel):
@@ -46,9 +61,21 @@ class ContributionDetail(StrictComparativeModel):
     baseline: Decimal
     dimension_change: Decimal
     contribution_rate: Decimal | None
+    baseline_value: Decimal = Decimal(0)
+    current_value: Decimal = Decimal(0)
+    absolute_change: Decimal = Decimal(0)
+    contribution_rate_display: str = ""
     evidence_ids: tuple[Literal["baseline_breakdown"], Literal["current_breakdown"]] = (
         "baseline_breakdown", "current_breakdown",
     )
+
+    @model_validator(mode="after")
+    def canonical_output(self):
+        object.__setattr__(self, "baseline_value", self.baseline)
+        object.__setattr__(self, "current_value", self.current)
+        object.__setattr__(self, "absolute_change", self.dimension_change)
+        object.__setattr__(self, "contribution_rate_display", display_decimal(self.contribution_rate, percent=True))
+        return self
 
 
 class Contribution(StrictComparativeModel):

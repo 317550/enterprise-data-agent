@@ -360,3 +360,12 @@ DeepSeek 全局可用性，也不证明系统不存在所有未知安全缺陷�
 
 不引入需求之外的东西：没有微服务、没有 Redis、没有向量数据库、没有多 Agent 框架、
 没有额外的 ORM。语义层是三份 YAML 加一个 Pydantic 加载器，不是一个新框架。
+
+### 阶段 4B 输出契约
+
+eda/query/comparative_models.py 是公共执行接口与会话/CLI 共同的输出模型。
+值别名和比例展示在该层确定性派生，展示复用 eda.metrics.comparative.display_decimal，
+不进入 Planner、checkpoint 或 SQL 层。比较对象包含完整两期及明确 *_value 字段；
+贡献明细提供 absolute_change 与 contribution_rate_display，旧字段均保留。
+Decimal JSON 字符串和比例精度不变，未定义显示“无定义”。
+详见 [4B-2 输出示例](stage4b-2-comparative-execution.md)。
